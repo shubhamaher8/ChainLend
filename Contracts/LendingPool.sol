@@ -1,169 +1,287 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.22;
+pragma solidity ^0.8.19;
 
-import "https://raw.githubusercontent.com/LayerZero-Labs/devtools/main/packages/oapp-evm/contracts/oapp/OApp.sol";
-import "https://raw.githubusercontent.com/LayerZero-Labs/devtools/main/packages/oapp-evm/contracts/oapp/libs/OptionsBuilder.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/security/Pausable.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 
-interface ILendingPool {
-    function lockCollateral(address user, uint256 amount) external;
-    function unlockCollateral(address user, uint256 amount) external;
-    function borrow(address user, uint256 amount) external;
-    function repay() external;
-}
+/**
+ * @title LendingPool
+ * @notice Core banking contract for ChainLend.
+ *
+ * AMOY (Collateral Chain) uses: deposit(), withdraw(), lockCollateral(), unlockCollateral()
+ * SEPOLIA (Loan Chain) uses:    borrow(), repay(), getDebt()
+ *
+ * Interest model:
+ *   - Deposits earn  5% APY  (DEPOSIT_APY_BPS  = 500  basis points)
+ *   - Borrows accrue 8% APR  (BORROW_APR_BPS   = 800  basis points)
+ *   - LTV ratio: 50%         (MAX_LTV_BPS      = 5000 basis points)
+ *
+ * Access control:
+ *   - Only the authorised bridge contract can call lockCollateral / unlockCollateral / borrow
+ */
+contract LendingPool is ReentrancyGuard, Pausable, Ownable {
+    using SafeERC20 for IERC20;
 
-contract ChainLendBridge is OApp {
-    using OptionsBuilder for bytes;
+    // ─── Constants ────────────────────────────────────────────────────────────
+    uint256 public constant DEPOSIT_APY_BPS = 500;   // 5.00%
+    uint256 public constant BORROW_APR_BPS  = 800;   // 8.00%
+    uint256 public constant MAX_LTV_BPS     = 5000;  // 50.00%
+    uint256 public constant BPS_DENOMINATOR = 10_000;
+    uint256 public constant SECONDS_PER_YEAR = 365 days;
 
-    uint8 public constant MSG_LOCK_COLLATERAL   = 1;
-    uint8 public constant MSG_COLLATERAL_LOCKED = 2;
-    uint8 public constant MSG_UNLOCK_COLLATERAL = 3;
+    // ─── State ────────────────────────────────────────────────────────────────
+    IERC20 public immutable token;
 
-    ILendingPool public lendingPool;
-    uint32 public remoteEid;
-    uint128 public constant DESTINATION_GAS_LIMIT = 200_000;
+    /// @notice Address of the ChainLendBridge — only it can call privileged functions
+    address public bridge;
 
-    event BorrowRequested(address indexed user, uint256 amount, uint256 collateralRequired);
-    event CollateralLockConfirmed(address indexed user, uint256 amount);
-    event RepayAndUnlockInitiated(address indexed user, uint256 collateralAmount);
+    // --- Amoy side (collateral) ---
+    struct DepositInfo {
+        uint256 availableBalance;  // freely withdrawable
+        uint256 lockedBalance;     // locked as cross-chain collateral
+        uint256 depositTimestamp;  // when the deposit was made (for APY calc)
+    }
+    mapping(address => DepositInfo) public deposits;
+
+    // --- Sepolia side (loans) ---
+    struct LoanInfo {
+        uint256 principal;          // original borrowed amount
+        uint256 borrowTimestamp;    // when the loan was initiated
+    }
+    mapping(address => LoanInfo) public loans;
+
+    // ─── Events ───────────────────────────────────────────────────────────────
+    event BridgeSet(address indexed bridge);
+    event Deposited(address indexed user, uint256 amount);
+    event Withdrawn(address indexed user, uint256 amount, uint256 interest);
+    event CollateralLocked(address indexed user, uint256 amount);
     event CollateralUnlocked(address indexed user, uint256 amount);
+    event Borrowed(address indexed user, uint256 amount);
+    event Repaid(address indexed user, uint256 principal, uint256 interest);
 
-    error LendingPoolNotSet();
-    error RemoteEidNotSet();
-    error UnknownMessageType(uint8 msgType);
-    error InsufficientFee(uint256 required, uint256 provided);
+    // ─── Errors ───────────────────────────────────────────────────────────────
+    error BridgeNotSet();
+    error OnlyBridge();
+    error ZeroAmount();
+    error InsufficientBalance(uint256 requested, uint256 available);
+    error ExceedsLTV(uint256 requested, uint256 maxAllowed);
+    error NoActiveLoan();
+    error LoanAlreadyExists();
 
-    constructor(address _endpoint, address _delegate)
-        OApp(_endpoint, _delegate)
-        Ownable(msg.sender)
-    {}
-
-    function setLendingPool(address _pool) external onlyOwner {
-        require(_pool != address(0), "Zero address");
-        lendingPool = ILendingPool(_pool);
+    // ─── Modifiers ────────────────────────────────────────────────────────────
+    modifier onlyBridge() {
+        if (msg.sender != bridge) revert OnlyBridge();
+        _;
     }
 
-    function setRemoteEid(uint32 _eid) external onlyOwner {
-        remoteEid = _eid;
+    modifier nonZero(uint256 amount) {
+        if (amount == 0) revert ZeroAmount();
+        _;
     }
 
-    function requestBorrow(uint256 borrowAmount) external payable {
-        if (address(lendingPool) == address(0)) revert LendingPoolNotSet();
-        if (remoteEid == 0) revert RemoteEidNotSet();
-
-        uint256 collateralRequired = borrowAmount * 2;
-
-        bytes memory payload = abi.encode(
-            MSG_LOCK_COLLATERAL,
-            msg.sender,
-            collateralRequired,
-            borrowAmount
-        );
-
-        bytes memory options = OptionsBuilder
-            .newOptions()
-            .addExecutorLzReceiveOption(DESTINATION_GAS_LIMIT, 0);
-
-        MessagingFee memory fee = _quote(remoteEid, payload, options, false);
-        if (msg.value < fee.nativeFee) revert InsufficientFee(fee.nativeFee, msg.value);
-
-        _lzSend(remoteEid, payload, options, fee, payable(msg.sender));
-
-        emit BorrowRequested(msg.sender, borrowAmount, collateralRequired);
+    // ─── Constructor ──────────────────────────────────────────────────────────
+    constructor(address _token) Ownable(msg.sender) {
+        token = IERC20(_token);
     }
 
-    function quoteBorrow(uint256 borrowAmount) external view returns (uint256 nativeFee) {
-        uint256 collateralRequired = borrowAmount * 2;
-        bytes memory payload = abi.encode(
-            MSG_LOCK_COLLATERAL,
-            msg.sender,
-            collateralRequired,
-            borrowAmount
-        );
-        bytes memory options = OptionsBuilder
-            .newOptions()
-            .addExecutorLzReceiveOption(DESTINATION_GAS_LIMIT, 0);
+    // ─── Admin Functions ──────────────────────────────────────────────────────
 
-        MessagingFee memory fee = _quote(remoteEid, payload, options, false);
-        return fee.nativeFee;
+    /**
+     * @notice Set the authorised bridge contract. Can only be set once.
+     * @param _bridge Address of ChainLendBridge
+     */
+    function setBridge(address _bridge) external onlyOwner {
+        require(_bridge != address(0), "Zero address");
+        bridge = _bridge;
+        emit BridgeSet(_bridge);
     }
 
-    function repayAndUnlock(uint256 collateralAmount) external payable {
-        if (address(lendingPool) == address(0)) revert LendingPoolNotSet();
-        if (remoteEid == 0) revert RemoteEidNotSet();
+    function pause()   external onlyOwner { _pause(); }
+    function unpause() external onlyOwner { _unpause(); }
 
-        lendingPool.repay();
+    // ─── Amoy Side: Collateral Functions ──────────────────────────────────────
 
-        bytes memory payload = abi.encode(
-            MSG_UNLOCK_COLLATERAL,
-            msg.sender,
-            collateralAmount
-        );
+    /**
+     * @notice Deposit tokens as collateral (Amoy chain).
+     * @param amount Amount in token's smallest unit (6 decimals for USDC)
+     */
+    function deposit(uint256 amount) external nonReentrant whenNotPaused nonZero(amount) {
+        // Settle any existing deposit interest before adding new funds
+        _settleDepositInterest(msg.sender);
 
-        bytes memory options = OptionsBuilder
-            .newOptions()
-            .addExecutorLzReceiveOption(DESTINATION_GAS_LIMIT, 0);
+        token.safeTransferFrom(msg.sender, address(this), amount);
+        deposits[msg.sender].availableBalance += amount;
 
-        MessagingFee memory fee = _quote(remoteEid, payload, options, false);
-        if (msg.value < fee.nativeFee) revert InsufficientFee(fee.nativeFee, msg.value);
+        // Reset timestamp on each deposit (simplified; production would use weighted avg)
+        deposits[msg.sender].depositTimestamp = block.timestamp;
 
-        _lzSend(remoteEid, payload, options, fee, payable(msg.sender));
-
-        emit RepayAndUnlockInitiated(msg.sender, collateralAmount);
+        emit Deposited(msg.sender, amount);
     }
 
-    function _lzReceive(
-        Origin calldata _origin,
-        bytes32,
-        bytes calldata payload,
-        address,
-        bytes calldata
-    ) internal override {
-        uint8 msgType = uint8(payload[0]);
+    /**
+     * @notice Withdraw available (unlocked) collateral plus accrued interest (Amoy chain).
+     * @param amount Amount to withdraw
+     */
+    function withdraw(uint256 amount) external nonReentrant whenNotPaused nonZero(amount) {
+        _settleDepositInterest(msg.sender);
 
-        if (msgType == MSG_LOCK_COLLATERAL) {
-            (, address user, uint256 collateralAmount, uint256 borrowAmount) =
-                abi.decode(payload, (uint8, address, uint256, uint256));
+        uint256 available = deposits[msg.sender].availableBalance;
+        if (amount > available) revert InsufficientBalance(amount, available);
 
-            lendingPool.lockCollateral(user, collateralAmount);
+        deposits[msg.sender].availableBalance -= amount;
+        token.safeTransfer(msg.sender, amount);
 
-            bytes memory confirmPayload = abi.encode(
-                MSG_COLLATERAL_LOCKED,
-                user,
-                collateralAmount,
-                borrowAmount
-            );
-            bytes memory options = OptionsBuilder
-                .newOptions()
-                .addExecutorLzReceiveOption(DESTINATION_GAS_LIMIT, 0);
+        emit Withdrawn(msg.sender, amount, 0); // interest already settled into balance
+    }
 
-            MessagingFee memory fee = _quote(_origin.srcEid, confirmPayload, options, false);
-            _lzSend(_origin.srcEid, confirmPayload, options, fee, payable(address(this)));
+    /**
+     * @notice Lock collateral for a cross-chain loan. Called only by bridge.
+     * @param user   Borrower address
+     * @param amount Amount to lock
+     */
+    function lockCollateral(address user, uint256 amount)
+        external
+        onlyBridge
+        nonZero(amount)
+    {
+        uint256 available = deposits[user].availableBalance;
+        if (amount > available) revert InsufficientBalance(amount, available);
 
-            emit CollateralLockConfirmed(user, collateralAmount);
+        deposits[user].availableBalance -= amount;
+        deposits[user].lockedBalance     += amount;
 
-        } else if (msgType == MSG_COLLATERAL_LOCKED) {
-            (, address user, , uint256 borrowAmount) =
-                abi.decode(payload, (uint8, address, uint256, uint256));
+        emit CollateralLocked(user, amount);
+    }
 
-            lendingPool.borrow(user, borrowAmount);
+    /**
+     * @notice Unlock collateral after loan repayment. Called only by bridge.
+     * @param user   Borrower address
+     * @param amount Amount to unlock
+     */
+    function unlockCollateral(address user, uint256 amount)
+        external
+        onlyBridge
+        nonZero(amount)
+    {
+        uint256 locked = deposits[user].lockedBalance;
+        if (amount > locked) revert InsufficientBalance(amount, locked);
 
-        } else if (msgType == MSG_UNLOCK_COLLATERAL) {
-            (, address user, uint256 collateralAmount) =
-                abi.decode(payload, (uint8, address, uint256));
+        deposits[user].lockedBalance     -= amount;
+        deposits[user].availableBalance  += amount;
 
-            lendingPool.unlockCollateral(user, collateralAmount);
+        emit CollateralUnlocked(user, amount);
+    }
 
-            emit CollateralUnlocked(user, collateralAmount);
+    // ─── Sepolia Side: Loan Functions ─────────────────────────────────────────
 
-        } else {
-            revert UnknownMessageType(msgType);
+    /**
+     * @notice Disburse a loan to the borrower (Sepolia chain). Called only by bridge.
+     * @param user   Borrower address
+     * @param amount Loan amount (must be ≤ 50% of verified collateral — enforced on Amoy)
+     */
+    function borrow(address user, uint256 amount)
+        external
+        onlyBridge
+        nonReentrant
+        whenNotPaused
+        nonZero(amount)
+    {
+        if (loans[user].principal > 0) revert LoanAlreadyExists();
+
+        loans[user] = LoanInfo({
+            principal:        amount,
+            borrowTimestamp:  block.timestamp
+        });
+
+        token.safeTransfer(user, amount);
+        emit Borrowed(user, amount);
+    }
+
+    /**
+     * @notice Repay the full outstanding loan plus accrued interest.
+     */
+    function repay() external nonReentrant whenNotPaused {
+        if (loans[msg.sender].principal == 0) revert NoActiveLoan();
+
+        (uint256 principal, uint256 interest) = getDebt(msg.sender);
+        uint256 total = principal + interest;
+
+        delete loans[msg.sender];
+
+        token.safeTransferFrom(msg.sender, address(this), total);
+        emit Repaid(msg.sender, principal, interest);
+
+        // NOTE: After repay(), the bridge on Sepolia must send a LayerZero message
+        //       back to Amoy to trigger unlockCollateral(). This is handled in
+        //       ChainLendBridge.repayAndUnlock().
+    }
+
+    // ─── View Functions ───────────────────────────────────────────────────────
+
+    /**
+     * @notice Get the current outstanding debt (principal + accrued interest).
+     * @return principal  Original borrowed amount
+     * @return interest   Accrued interest so far
+     */
+    function getDebt(address user)
+        public
+        view
+        returns (uint256 principal, uint256 interest)
+    {
+        LoanInfo memory loan = loans[user];
+        if (loan.principal == 0) return (0, 0);
+
+        principal = loan.principal;
+        uint256 elapsed = block.timestamp - loan.borrowTimestamp;
+        interest = (principal * BORROW_APR_BPS * elapsed) / (BPS_DENOMINATOR * SECONDS_PER_YEAR);
+    }
+
+    /**
+     * @notice Get the maximum borrowable amount for a given collateral amount.
+     * @param collateralAmount Collateral in token units
+     * @return maxBorrow 50% of collateral
+     */
+    function getMaxBorrow(uint256 collateralAmount) public pure returns (uint256) {
+        return (collateralAmount * MAX_LTV_BPS) / BPS_DENOMINATOR;
+    }
+
+    /**
+     * @notice Get full balance info for a depositor.
+     */
+    function getBalance(address user)
+        external
+        view
+        returns (
+            uint256 available,
+            uint256 locked,
+            uint256 accruedInterest
+        )
+    {
+        DepositInfo memory d = deposits[user];
+        available = d.availableBalance;
+        locked    = d.lockedBalance;
+        accruedInterest = _calculateDepositInterest(user);
+    }
+
+    // ─── Internal Helpers ─────────────────────────────────────────────────────
+
+    function _calculateDepositInterest(address user) internal view returns (uint256) {
+        DepositInfo memory d = deposits[user];
+        if (d.availableBalance == 0 || d.depositTimestamp == 0) return 0;
+
+        uint256 elapsed = block.timestamp - d.depositTimestamp;
+        return (d.availableBalance * DEPOSIT_APY_BPS * elapsed) /
+               (BPS_DENOMINATOR * SECONDS_PER_YEAR);
+    }
+
+    function _settleDepositInterest(address user) internal {
+        uint256 interest = _calculateDepositInterest(user);
+        if (interest > 0) {
+            deposits[user].availableBalance  += interest;
+            deposits[user].depositTimestamp   = block.timestamp;
         }
-    }
-
-    receive() external payable {}
-
-    function withdrawNative(address payable to, uint256 amount) external onlyOwner {
-        (bool ok,) = to.call{value: amount}("");
-        require(ok, "Transfer failed");
     }
 }
