@@ -27,8 +27,8 @@ const ADDRESSES = {
   },
   sepolia: {
     mockUSDC:    "0xef2B880E4653381A613Abd215aE5f13ce6d5Ef9d",
-    lendingPool: "0x125A5348bE74073b03970dB888549258d6d5db99",
-    bridge:      "0x3C972A74Fc0dAD0Fa32CeD08C8334B521E44aC83",
+    lendingPool: "0xDf4C577D550dC83A0f37E43C6B4401b09CBBc7da",
+    bridge:      "0x9a1b3f3Cd7120c184c38f585949079c0264ACd0A",
   },
 };
 
