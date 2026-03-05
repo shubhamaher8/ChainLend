@@ -9,7 +9,8 @@ interface ILendingPool {
     function lockCollateral(address user, uint256 amount) external;
     function unlockCollateral(address user, uint256 amount) external;
     function borrow(address user, uint256 amount) external;
-    function repay() external;
+    // FIX: repayFor(user) instead of repay() — bridge passes the real user address
+    function repayFor(address user) external;
 }
 
 contract ChainLendBridge is OApp {
@@ -21,7 +22,7 @@ contract ChainLendBridge is OApp {
 
     ILendingPool public lendingPool;
     uint32 public remoteEid;
-    uint128 public constant DESTINATION_GAS_LIMIT = 200_000;
+    uint128 public constant DESTINATION_GAS_LIMIT = 300_000; // bumped from 200k for safety
 
     event BorrowRequested(address indexed user, uint256 amount, uint256 collateralRequired);
     event CollateralLockConfirmed(address indexed user, uint256 amount);
@@ -92,7 +93,8 @@ contract ChainLendBridge is OApp {
         if (address(lendingPool) == address(0)) revert LendingPoolNotSet();
         if (remoteEid == 0) revert RemoteEidNotSet();
 
-        lendingPool.repay();
+        // FIX: pass msg.sender so LendingPool knows whose debt to repay
+        lendingPool.repayFor(msg.sender);
 
         bytes memory payload = abi.encode(
             MSG_UNLOCK_COLLATERAL,
@@ -119,7 +121,10 @@ contract ChainLendBridge is OApp {
         address,
         bytes calldata
     ) internal override {
-        uint8 msgType = uint8(payload[0]);
+        // FIX: decode the full uint8 properly from ABI-encoded payload
+        // abi.encode pads uint8 to 32 bytes, so payload[0] is always 0x00 (padding).
+        // Correct approach: decode the first slot as uint8.
+        uint8 msgType = abi.decode(payload, (uint8));
 
         if (msgType == MSG_LOCK_COLLATERAL) {
             (, address user, uint256 collateralAmount, uint256 borrowAmount) =
