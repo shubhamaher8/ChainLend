@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChainLend — Cross-Chain DeFi</title>
+  <link rel="stylesheet" href="style.css" />
+  <!-- Ethers.js v6 via CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ─── Header ──────────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">Chain<span>Lend</span></div>
+
+  <div class="header-right">
+    <span id="chain-badge" class="chain-badge unknown">Not Connected</span>
+
+    <div id="wallet-info">
+      <div class="wallet-dot"></div>
+      <span id="wallet-address"></span>
+    </div>
+
+    <button id="btn-connect" class="btn-primary btn-sm">Connect Wallet</button>
+    <button id="btn-refresh" class="btn-ghost btn-sm">↺ Refresh</button>
+  </div>
+</header>
+
+<!-- ─── Main ────────────────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Status bar -->
+  <div id="status-bar" class="status-bar"></div>
+
+  <!-- Network switcher -->
+  <div class="network-switcher">
+    <span>Switch network:</span>
+    <button id="btn-switch-amoy"    class="btn-amoy btn-sm">Polygon Amoy</button>
+    <button id="btn-switch-sepolia" class="btn-sepolia btn-sm">Ethereum Sepolia</button>
+  </div>
+
+  <!-- Nav tabs -->
+  <div class="nav-tabs">
+    <button class="nav-tab active" data-panel="panel-amoy">Amoy — Deposit</button>
+    <button class="nav-tab"        data-panel="panel-sepolia">Sepolia — Borrow</button>
+    <button class="nav-tab"        data-panel="panel-faucet">Faucet</button>
+    <button class="nav-tab"        data-panel="panel-guide">How It Works</button>
+  </div>
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- PANEL: Amoy (Deposit / Withdraw) -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div id="panel-amoy" class="panel active">
+
+    <div class="grid-2">
+
+      <!-- Balances -->
+      <div class="card card-amoy">
+        <div class="card-title"><span class="dot"></span> Amoy Balances</div>
+
+        <div class="stat-row">
+          <span class="stat-label">Wallet (mUSDC)</span>
+          <span id="amoy-wallet-bal" class="stat-value">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Deposited (available)</span>
+          <span id="amoy-deposited" class="stat-value highlight-amoy">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Locked as collateral</span>
+          <span id="amoy-locked" class="stat-value highlight-accent">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Accrued interest (5% APY)</span>
+          <span id="amoy-interest" class="stat-value highlight-success">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Max borrow on Sepolia</span>
+          <span id="amoy-max-borrow" class="stat-value highlight-sepolia">—</span>
+        </div>
+      </div>
+
+      <!-- Protocol params -->
+      <div class="card card-amoy">
+        <div class="card-title"><span class="dot"></span> Protocol Parameters</div>
+        <div class="param-grid" style="grid-template-columns:1fr 1fr; margin-top:0.5rem;">
+          <div class="param-card">
+            <span class="param-value">5%</span>
+            <span class="param-label">Deposit APY</span>
+          </div>
+          <div class="param-card">
+            <span class="param-value">8%</span>
+            <span class="param-label">Borrow APR</span>
+          </div>
+          <div class="param-card" style="grid-column:span 2;">
+            <span class="param-value">50%</span>
+            <span class="param-label">Max Loan-to-Value</span>
+          </div>
+        </div>
+        <div class="info-box" style="margin-top:0.75rem;">
+          <strong>You are on Polygon Amoy.</strong> Deposit mUSDC here to use as collateral for borrowing sUSDC on Sepolia.
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Deposit -->
+    <div class="action-card">
+      <div class="action-title">⬇ Deposit mUSDC</div>
+      <div class="input-group">
+        <input id="input-deposit" type="number" placeholder="Amount (e.g. 1000)" min="0" step="any" />
+        <button id="btn-deposit" class="btn-amoy">Deposit</button>
+      </div>
+      <div class="info-box">
+        Deposited funds earn <strong>5% APY</strong> and can be used as collateral to borrow on Sepolia.
+      </div>
+    </div>
+
+    <!-- Withdraw -->
+    <div class="action-card">
+      <div class="action-title">⬆ Withdraw mUSDC</div>
+      <div class="input-group">
+        <input id="input-withdraw" type="number" placeholder="Amount (e.g. 500)" min="0" step="any" />
+        <button id="btn-withdraw" class="btn-amoy">Withdraw</button>
+      </div>
+      <div class="info-box">
+        Only <strong>unlocked (available)</strong> funds can be withdrawn. Locked collateral must be released by repaying your Sepolia loan first.
+      </div>
+    </div>
+
+  </div><!-- /panel-amoy -->
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- PANEL: Sepolia (Borrow / Repay) -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div id="panel-sepolia" class="panel">
+
+    <div class="grid-2">
+
+      <!-- Debt Balances -->
+      <div class="card card-sepolia">
+        <div class="card-title"><span class="dot"></span> Sepolia Loan Status</div>
+
+        <div class="stat-row">
+          <span class="stat-label">Wallet (sUSDC)</span>
+          <span id="sep-wallet-bal" class="stat-value">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Loan principal</span>
+          <span id="sep-principal" class="stat-value highlight-sepolia">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Accrued interest (8% APR)</span>
+          <span id="sep-interest" class="stat-value highlight-error">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Total debt to repay</span>
+          <span id="sep-total-debt" class="stat-value highlight-accent">—</span>
+        </div>
+      </div>
+
+      <!-- Info -->
+      <div class="card card-sepolia">
+        <div class="card-title"><span class="dot"></span> Cross-Chain Flow</div>
+        <div class="workflow">
+          <div class="workflow-step">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <strong>Request Borrow</strong>
+              <p>LayerZero sends a message to Amoy to lock your collateral.</p>
+            </div>
+          </div>
+          <div class="workflow-step">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <strong>Amoy Confirms</strong>
+              <p>Collateral locked. LayerZero sends confirmation back.</p>
+            </div>
+          </div>
+          <div class="workflow-step">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <strong>sUSDC Released</strong>
+              <p>Loan tokens arrive in your Sepolia wallet (~1-2 min).</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Borrow -->
+    <div class="action-card">
+      <div class="action-title">📤 Borrow sUSDC (Cross-Chain)</div>
+      <div class="input-group">
+        <input id="input-borrow" type="number" placeholder="Borrow amount (max 50% of deposited)" min="0" step="any" />
+        <button id="btn-quote-borrow" class="btn-ghost">Quote Fee</button>
+        <button id="btn-borrow" class="btn-sepolia">Borrow</button>
+      </div>
+      <div id="borrow-fee"></div>
+      <div class="info-box">
+        Maximum borrow = <strong>50% of your Amoy deposit</strong>. LayerZero fee (ETH) is required — click <em>Quote Fee</em> first. Funds arrive after ~1-2 minutes once Amoy confirms.
+      </div>
+    </div>
+
+    <!-- Repay -->
+    <div class="action-card">
+      <div class="action-title">🔓 Repay & Unlock Collateral</div>
+      <div class="input-group">
+        <input id="input-repay-collateral" type="number" placeholder="Collateral to unlock on Amoy" min="0" step="any" />
+        <button id="btn-repay" class="btn-sepolia">Repay & Unlock</button>
+      </div>
+      <div class="info-box">
+        Repays your <strong>full debt (principal + interest)</strong> and sends a LayerZero message to Amoy to unlock your collateral. Enter the amount of mUSDC you want unlocked.
+      </div>
+    </div>
+
+  </div><!-- /panel-sepolia -->
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- PANEL: Faucet -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div id="panel-faucet" class="panel">
+
+    <div class="card" style="margin-bottom:1.25rem;">
+      <div class="card-title"><span class="dot" style="background:var(--accent)"></span> Testnet Token Faucet</div>
+      <p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:1.5rem;">
+        Mint test tokens directly from the deployed contracts. Each click mints 10,000 tokens to your connected wallet.
+      </p>
+      <div class="faucet-row">
+        <button id="btn-mint-amoy"    class="btn-amoy">Mint 10,000 mUSDC (Amoy)</button>
+        <button id="btn-mint-sepolia" class="btn-sepolia">Mint 10,000 sUSDC (Sepolia)</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--text-muted)"></span> Need Gas Tokens?</div>
+      <p style="font-size:0.85rem; color:var(--text-muted); line-height:1.8;">
+        MATIC (Amoy): <a href="https://faucet.polygon.technology/" target="_blank" style="color:var(--amoy)">faucet.polygon.technology</a><br>
+        ETH (Sepolia): <a href="https://sepoliafaucet.com/" target="_blank" style="color:var(--sepolia)">sepoliafaucet.com</a><br>
+        ETH (Sepolia): <a href="https://www.alchemy.com/faucets/ethereum-sepolia" target="_blank" style="color:var(--sepolia)">alchemy.com/faucets/ethereum-sepolia</a>
+      </p>
+    </div>
+
+  </div><!-- /panel-faucet -->
+
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <!-- PANEL: How It Works -->
+  <!-- ─────────────────────────────────────────────────────────────────────── -->
+  <div id="panel-guide" class="panel">
+
+    <div class="card" style="margin-bottom:1.25rem;">
+      <div class="card-title"><span class="dot" style="background:var(--accent)"></span> Complete User Journey</div>
+
+      <div class="workflow">
+        <div class="workflow-step">
+          <div class="step-num">1</div>
+          <div class="step-content">
+            <strong>Switch to Polygon Amoy → Deposit mUSDC</strong>
+            <p>Connect MetaMask, switch to Amoy, mint test tokens via the Faucet tab, then deposit mUSDC into the LendingPool. Your funds start earning 5% APY immediately.</p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-num">2</div>
+          <div class="step-content">
+            <strong>Switch to Ethereum Sepolia → Borrow sUSDC</strong>
+            <p>Switch network to Sepolia. Enter a borrow amount (max 50% of your Amoy deposit). Quote the LayerZero fee, then submit. A cross-chain message locks your Amoy collateral.</p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-num">3</div>
+          <div class="step-content">
+            <strong>Wait ~1-2 Minutes</strong>
+            <p>LayerZero relays the message to Amoy, locks your collateral, sends confirmation back to Sepolia, and sUSDC is released to your wallet.</p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-num">4</div>
+          <div class="step-content">
+            <strong>Use Your sUSDC Freely</strong>
+            <p>Your borrowed sUSDC is in your Sepolia wallet. Interest accrues at 8% APR. Your Amoy deposit continues earning 5% APY in the background.</p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-num">5</div>
+          <div class="step-content">
+            <strong>Repay Debt → Unlock Collateral</strong>
+            <p>On Sepolia, repay the full debt (principal + interest). A LayerZero message signals Amoy to unlock your collateral.</p>
+          </div>
+        </div>
+        <div class="workflow-step">
+          <div class="step-num">6</div>
+          <div class="step-content">
+            <strong>Switch Back to Amoy → Withdraw</strong>
+            <p>Your collateral is now unlocked. Withdraw it along with the 5% APY interest you earned while it was deposited.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="dot" style="background:var(--text-muted)"></span> Contract Addresses</div>
+      <p style="font-size:0.8rem; color:var(--text-dim); margin-bottom:1rem; font-family:var(--font-mono);">Update constants.js with your deployed addresses after running the deploy scripts.</p>
+
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+        <div>
+          <div style="font-size:0.75rem; color:var(--amoy); font-family:var(--font-mono); letter-spacing:.08em; margin-bottom:.5rem;">POLYGON AMOY</div>
+          <div class="stat-row"><span class="stat-label">mUSDC</span><span class="stat-value" style="font-size:.75rem;">—</span></div>
+          <div class="stat-row"><span class="stat-label">LendingPool</span><span class="stat-value" style="font-size:.75rem;">—</span></div>
+          <div class="stat-row"><span class="stat-label">Bridge</span><span class="stat-value" style="font-size:.75rem;">—</span></div>
+        </div>
+        <div>
+          <div style="font-size:0.75rem; color:var(--sepolia); font-family:var(--font-mono); letter-spacing:.08em; margin-bottom:.5rem;">ETHEREUM SEPOLIA</div>
+          <div class="stat-row"><span class="stat-label">sUSDC</span><span class="stat-value" style="font-size:.75rem;">—</span></div>
+          <div class="stat-row"><span class="stat-label">LendingPool</span><span class="stat-value" style="font-size:.75rem;">—</span></div>
+          <div class="stat-row"><span class="stat-label">Bridge</span><span class="stat-value" style="font-size:.75rem;">—</span></div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /panel-guide -->
+
+</main>
+
+<!-- Scripts — order matters -->
+<script src="constants.js"></script>
+<script src="web3.js"></script>
+<script src="app.js"></script>
+
+</body>
+</html>
