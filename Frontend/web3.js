@@ -38,7 +38,6 @@ const Web3Manager = (() => {
         params: [{ chainId: net.chainId }],
       });
     } catch (err) {
-      // Chain not added to MetaMask yet — add it
       if (err.code === 4902) {
         await window.ethereum.request({
           method: "wallet_addEthereumChain",
@@ -79,10 +78,10 @@ const Web3Manager = (() => {
     ]);
 
     return {
-      walletBalance:    formatUSDC(walletBal),
-      available:        formatUSDC(poolBal.available),
-      locked:           formatUSDC(poolBal.locked),
-      accruedInterest:  formatUSDC(poolBal.accruedInterest),
+      walletBalance:   formatUSDC(walletBal),
+      available:       formatUSDC(poolBal.available),
+      locked:          formatUSDC(poolBal.locked),
+      accruedInterest: formatUSDC(poolBal.accruedInterest),
     };
   }
 
@@ -92,37 +91,37 @@ const Web3Manager = (() => {
     const pool     = getContract("lendingPool", "amoy");
     const poolAddr = ADDRESSES.amoy.lendingPool;
     const gasOpts  = {
-        maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"),
-        maxFeePerGas:         ethers.parseUnits("50", "gwei"),
+      maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"),
+      maxFeePerGas:         ethers.parseUnits("50", "gwei"),
     };
 
     const allowance = await usdc.allowance(userAddress, poolAddr);
     if (allowance < amount) {
-        const approveTx = await usdc.approve(poolAddr, ethers.MaxUint256, gasOpts);
-        await approveTx.wait();
+      const approveTx = await usdc.approve(poolAddr, ethers.MaxUint256, gasOpts);
+      await approveTx.wait();
     }
 
     const tx = await pool.deposit(amount, gasOpts);
     return tx.wait();
-}
+  }
 
   async function withdraw(amountHuman) {
     const amount = parseUSDC(amountHuman);
     const pool   = getContract("lendingPool", "amoy");
     const tx     = await pool.withdraw(amount, {
-        maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"), // above 25 minimum
-        maxFeePerGas:         ethers.parseUnits("50", "gwei"),
+      maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"),
+      maxFeePerGas:         ethers.parseUnits("50", "gwei"),
     });
     return tx.wait();
-}
+  }
 
   // ─── Sepolia (Loan Chain) Functions ───────────────────────────────────────
 
   async function getSepoliaBalances() {
     if (!userAddress) throw new Error("Wallet not connected");
 
-    const usdc   = getContract("mockUSDC", "sepolia");
-    const pool   = getContract("lendingPool", "sepolia");
+    const usdc = getContract("mockUSDC", "sepolia");
+    const pool = getContract("lendingPool", "sepolia");
 
     const [walletBal, debt] = await Promise.all([
       usdc.balanceOf(userAddress),
@@ -138,22 +137,26 @@ const Web3Manager = (() => {
   }
 
   async function quoteBorrow(amountHuman) {
-    const amount  = parseUSDC(amountHuman);
-    const bridge  = getContract("bridge", "sepolia");
-    const feeBig  = await bridge.quoteBorrow(amount);
-    return feeBig; // raw BigInt — pass directly to requestBorrow
+    const amount = parseUSDC(amountHuman);
+    const bridge = getContract("bridge", "sepolia");
+    const feeBig = await bridge.quoteBorrow(amount);
+    return feeBig;
   }
 
   async function requestBorrow(amountHuman) {
-    const amount  = parseUSDC(amountHuman);
-    const bridge  = getContract("bridge", "sepolia");
+    const amount = parseUSDC(amountHuman);
+    const bridge = getContract("bridge", "sepolia");
 
-    // Get the LZ fee first
-    const fee = await bridge.quoteBorrow(amount);
-    // Add 10% buffer for safety
-    const feeWithBuffer = fee + (fee / 10n);
+    // Get LayerZero fee with 20% buffer
+    const fee           = await bridge.quoteBorrow(amount);
+    const feeWithBuffer = fee + (fee / 5n);
 
-    const tx = await bridge.requestBorrow(amount, { value: feeWithBuffer });
+    // FIX: manual gasLimit stops ethers from running estimateGas,
+    // which was failing because it simulates with msg.value = 0
+    const tx = await bridge.requestBorrow(amount, {
+      value:    feeWithBuffer,
+      gasLimit: 500000n,
+    });
     return tx.wait();
   }
 
@@ -162,39 +165,38 @@ const Web3Manager = (() => {
     const usdc       = getContract("mockUSDC", "sepolia");
     const pool       = getContract("lendingPool", "sepolia");
     const bridge     = getContract("bridge", "sepolia");
-    const bridgeAddr = ADDRESSES.sepolia.bridge;
     const poolAddr   = ADDRESSES.sepolia.lendingPool;
 
     // 1. Get total debt
     const debt  = await pool.getDebt(userAddress);
     const total = debt.principal + debt.interest;
 
-    // 2. Approve pool to pull repayment
+    // 2. Approve LendingPool to pull repayment from user wallet
     const allowance = await usdc.allowance(userAddress, poolAddr);
     if (allowance < total) {
       const approveTx = await usdc.approve(poolAddr, ethers.MaxUint256);
       await approveTx.wait();
     }
 
-    // 3. Quote LZ fee for unlock message
-    // (use quoteBorrow as a proxy — same gas structure)
-    const lzFee = await bridge.quoteBorrow(total);
-    const feeWithBuffer = lzFee + (lzFee / 10n);
+    // 3. Quote LayerZero fee for unlock message with 20% buffer
+    const lzFee         = await bridge.quoteBorrow(collateral);
+    const feeWithBuffer = lzFee + (lzFee / 5n);
 
-    // 4. Call repayAndUnlock on bridge
-    const tx = await bridge.repayAndUnlock(collateral, { value: feeWithBuffer });
+    // 4. Call repayAndUnlock — manual gasLimit to skip broken estimateGas
+    const tx = await bridge.repayAndUnlock(collateral, {
+      value:    feeWithBuffer,
+      gasLimit: 500000n,
+    });
     return tx.wait();
   }
 
-  // ─── Mint Test Tokens (for testnet only) ─────────────────────────────────
+  // ─── Mint Test Tokens (testnet only) ─────────────────────────────────────
 
   async function mintTestTokens(networkKey, amountHuman) {
     const amount = parseUSDC(amountHuman);
-    const usdc   = getContract("mockUSDC", networkKey);
-    const mintAbi = ["function mint(address to, uint256 amount)"];
     const usdcWithMint = new ethers.Contract(
       ADDRESSES[networkKey].mockUSDC,
-      [...ABIS.MockUSDC, ...mintAbi],
+      ABIS.MockUSDC,
       signer
     );
     const tx = await usdcWithMint.mint(userAddress, amount);
