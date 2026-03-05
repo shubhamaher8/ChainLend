@@ -87,29 +87,34 @@ const Web3Manager = (() => {
   }
 
   async function deposit(amountHuman) {
-    const amount = parseUSDC(amountHuman);
-    const usdc   = getContract("mockUSDC", "amoy");
-    const pool   = getContract("lendingPool", "amoy");
+    const amount   = parseUSDC(amountHuman);
+    const usdc     = getContract("mockUSDC", "amoy");
+    const pool     = getContract("lendingPool", "amoy");
     const poolAddr = ADDRESSES.amoy.lendingPool;
+    const gasOpts  = {
+        maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"),
+        maxFeePerGas:         ethers.parseUnits("50", "gwei"),
+    };
 
-    // 1. Approve
     const allowance = await usdc.allowance(userAddress, poolAddr);
     if (allowance < amount) {
-      const approveTx = await usdc.approve(poolAddr, ethers.MaxUint256);
-      await approveTx.wait();
+        const approveTx = await usdc.approve(poolAddr, ethers.MaxUint256, gasOpts);
+        await approveTx.wait();
     }
 
-    // 2. Deposit
-    const tx = await pool.deposit(amount);
+    const tx = await pool.deposit(amount, gasOpts);
     return tx.wait();
-  }
+}
 
   async function withdraw(amountHuman) {
     const amount = parseUSDC(amountHuman);
     const pool   = getContract("lendingPool", "amoy");
-    const tx     = await pool.withdraw(amount);
+    const tx     = await pool.withdraw(amount, {
+        maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"), // above 25 minimum
+        maxFeePerGas:         ethers.parseUnits("50", "gwei"),
+    });
     return tx.wait();
-  }
+}
 
   // ─── Sepolia (Loan Chain) Functions ───────────────────────────────────────
 
