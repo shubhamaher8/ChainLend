@@ -1,306 +1,423 @@
-// frontend/app.js
-// UI logic — connects DOM to Web3Manager
+// ─── ChainLend App Logic ──────────────────────────────────────────────────────
 
-// ─── State ──────────────────────────────────────────────────────────────────
-const State = {
-  connected: false,
-  currentChain: null,   // "amoy" | "sepolia" | "unknown"
-};
+// ─── UI State ─────────────────────────────────────────────────────────────────
+let isPolling = false;
 
-const CHAIN_ID_MAP = {
-  80002:    "amoy",
-  11155111: "sepolia",
-};
+// ─── On Load ──────────────────────────────────────────────────────────────────
+window.addEventListener("load", () => {
+  setupWalletListeners(
+    (addr) => {
+      userAddress = addr;
+      if (addr) refreshAllBalances();
+      else resetUI();
+    },
+    () => refreshAllBalances()
+  );
+});
 
-// ─── DOM Helpers ─────────────────────────────────────────────────────────────
-
-const $ = (id) => document.getElementById(id);
-
-function setStatus(msg, type = "info") {
-  // type: "info" | "success" | "error" | "loading"
-  const el = $("status-bar");
-  el.textContent = msg;
-  el.className   = `status-bar status-${type}`;
-  el.style.display = msg ? "block" : "none";
-}
-
-function showTxLink(networkKey, receipt) {
-  const url = Web3Manager.getExplorerTxUrl(networkKey, receipt.hash);
-  setStatus(`✅ Transaction confirmed! View on explorer →`, "success");
-  const link = document.createElement("a");
-  link.href   = url;
-  link.target = "_blank";
-  link.textContent = " " + receipt.hash.slice(0, 10) + "...";
-  $("status-bar").appendChild(link);
-}
-
-function setLoading(buttonId, loading) {
-  const btn = $(buttonId);
-  if (!btn) return;
-  btn.disabled = loading;
-  btn.dataset.original = btn.dataset.original || btn.textContent;
-  btn.textContent = loading ? "Processing..." : btn.dataset.original;
-}
-
-function updateWalletUI(address) {
-  $("btn-connect").style.display    = "none";
-  $("wallet-info").style.display    = "flex";
-  $("wallet-address").textContent   = Web3Manager.shortenAddress(address);
-}
-
-function updateChainBadge(chainKey) {
-  const badge = $("chain-badge");
-  if (chainKey === "amoy") {
-    badge.textContent   = "Polygon Amoy";
-    badge.className     = "chain-badge amoy";
-  } else if (chainKey === "sepolia") {
-    badge.textContent   = "Ethereum Sepolia";
-    badge.className     = "chain-badge sepolia";
-  } else {
-    badge.textContent   = "Unknown Network";
-    badge.className     = "chain-badge unknown";
-  }
-}
-
-function showPanel(panelId) {
-  document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
-  const el = $(panelId);
-  if (el) el.classList.add("active");
-  document.querySelectorAll(".nav-tab").forEach(t => t.classList.remove("active"));
-  const tab = document.querySelector(`[data-panel="${panelId}"]`);
-  if (tab) tab.classList.add("active");
-}
-
-// ─── Wallet Connect ──────────────────────────────────────────────────────────
-
-$("btn-connect").addEventListener("click", async () => {
+// ─── Connect Wallet ───────────────────────────────────────────────────────────
+async function handleConnect() {
   try {
-    setStatus("Connecting wallet...", "loading");
-    const address = await Web3Manager.connectWallet();
-    const chainId = await Web3Manager.getCurrentChainId();
-    State.connected  = true;
-    State.currentChain = CHAIN_ID_MAP[chainId] || "unknown";
-
-    updateWalletUI(address);
-    updateChainBadge(State.currentChain);
+    setStatus("Connecting wallet...", "info");
+    const addr = await connectWallet();
+    document.getElementById("wallet-address").textContent =
+      addr.slice(0, 6) + "..." + addr.slice(-4);
+    document.getElementById("connect-btn").textContent = "Connected";
+    document.getElementById("connect-btn").disabled = true;
     setStatus("Wallet connected!", "success");
-
-    // Load balances for the active chain
-    await refreshBalances();
-    setTimeout(() => setStatus("", ""), 3000);
+    await refreshAllBalances();
   } catch (err) {
-    setStatus(err.message, "error");
-  }
-});
-
-// ─── Network Switcher ────────────────────────────────────────────────────────
-
-$("btn-switch-amoy").addEventListener("click", async () => {
-  try {
-    setStatus("Switching to Polygon Amoy...", "loading");
-    await Web3Manager.switchNetwork("amoy");
-    State.currentChain = "amoy";
-    updateChainBadge("amoy");
-    await refreshBalances();
-    setStatus("Switched to Polygon Amoy", "success");
-    setTimeout(() => setStatus("", ""), 2000);
-  } catch (err) {
-    setStatus(err.message, "error");
-  }
-});
-
-$("btn-switch-sepolia").addEventListener("click", async () => {
-  try {
-    setStatus("Switching to Ethereum Sepolia...", "loading");
-    await Web3Manager.switchNetwork("sepolia");
-    State.currentChain = "sepolia";
-    updateChainBadge("sepolia");
-    await refreshBalances();
-    setStatus("Switched to Ethereum Sepolia", "success");
-    setTimeout(() => setStatus("", ""), 2000);
-  } catch (err) {
-    setStatus(err.message, "error");
-  }
-});
-
-// ─── Balance Refresh ─────────────────────────────────────────────────────────
-
-async function refreshBalances() {
-  if (!State.connected) return;
-  try {
-    if (State.currentChain === "amoy") {
-      const b = await Web3Manager.getAmoyBalances();
-      $("amoy-wallet-bal").textContent   = b.walletBalance + " mUSDC";
-      $("amoy-deposited").textContent    = b.available + " mUSDC";
-      $("amoy-locked").textContent       = b.locked + " mUSDC";
-      $("amoy-interest").textContent     = b.accruedInterest + " mUSDC";
-      $("amoy-max-borrow").textContent   =
-        (parseFloat(b.available) * 0.5).toFixed(2) + " sUSDC";
-    } else if (State.currentChain === "sepolia") {
-      const b = await Web3Manager.getSepoliaBalances();
-      $("sep-wallet-bal").textContent    = b.walletBalance + " sUSDC";
-      $("sep-principal").textContent     = b.debtPrincipal + " sUSDC";
-      $("sep-interest").textContent      = b.debtInterest + " sUSDC";
-      $("sep-total-debt").textContent    = b.totalDebt + " sUSDC";
-    }
-  } catch (err) {
-    console.warn("Balance refresh failed:", err.message);
+    setStatus("Connection failed: " + err.message, "error");
   }
 }
 
-$("btn-refresh").addEventListener("click", async () => {
+// ─── Refresh All Balances ─────────────────────────────────────────────────────
+async function refreshAllBalances() {
+  if (!userAddress) return;
+
   try {
-    setStatus("Refreshing balances...", "loading");
-    await refreshBalances();
-    setStatus("Balances updated", "success");
-    setTimeout(() => setStatus("", ""), 1500);
+    // Amoy balances — switch read contracts
+    const amoyRead = getAmoyReadContracts();
+    const [amoyAvailable, amoyLocked, amoyInterest] = await Promise.all([
+      amoyRead.lendingPool.getAvailableBalance(userAddress),
+      amoyRead.lendingPool.getLockedBalance(userAddress),
+      amoyRead.lendingPool.getAccruedInterest(userAddress),
+    ]);
+
+    document.getElementById("amoy-available").textContent =
+      formatUSDC(amoyAvailable) + " mUSDC";
+    document.getElementById("amoy-locked").textContent =
+      formatUSDC(amoyLocked) + " mUSDC";
+    document.getElementById("amoy-interest").textContent =
+      formatUSDC(amoyInterest) + " mUSDC";
+
+    // Max borrowable = locked / 2 (50% LTV)
+    // But we show what they CAN borrow based on available deposit
+    const maxBorrow = amoyAvailable / 2n;
+    document.getElementById("max-borrow").textContent =
+      formatUSDC(maxBorrow) + " sUSDC";
+
+    // Sepolia balances — use read-only provider
+    const sepoliaReadProvider = new ethers.JsonRpcProvider(
+      NETWORKS.sepolia.rpcUrls[0]
+    );
+    const sepoliaLP = new ethers.Contract(
+      ADDRESSES.sepolia.lendingPool,
+      SEPOLIA_LENDING_POOL_ABI,
+      sepoliaReadProvider
+    );
+    const sepoliaUSDC = new ethers.Contract(
+      ADDRESSES.sepolia.mockUSDC,
+      ERC20_ABI,
+      sepoliaReadProvider
+    );
+
+    const [debt, sepoliaBalance] = await Promise.all([
+      sepoliaLP.getDebt(userAddress),
+      sepoliaUSDC.balanceOf(userAddress),
+    ]);
+
+    document.getElementById("sepolia-debt").textContent =
+      formatUSDC(debt) + " sUSDC";
+    document.getElementById("sepolia-balance").textContent =
+      formatUSDC(sepoliaBalance) + " sUSDC";
+
   } catch (err) {
-    setStatus(err.message, "error");
+    console.error("Balance refresh error:", err);
   }
-});
+}
 
-// ─── Deposit ─────────────────────────────────────────────────────────────────
-
-$("btn-deposit").addEventListener("click", async () => {
-  const amount = $("input-deposit").value.trim();
-  if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
-    setStatus("Enter a valid deposit amount", "error"); return;
+// ─── PHASE 1: DEPOSIT ─────────────────────────────────────────────────────────
+async function handleDeposit() {
+  const amount = document.getElementById("deposit-amount").value;
+  if (!amount || Number(amount) <= 0) {
+    setStatus("Enter a valid deposit amount.", "error");
+    return;
   }
+
   try {
-    setLoading("btn-deposit", true);
-    setStatus("Approving & depositing...", "loading");
-    const receipt = await Web3Manager.deposit(amount);
-    showTxLink("amoy", receipt);
-    $("input-deposit").value = "";
-    await refreshBalances();
+    setStatus("Switching to Amoy...", "info");
+    await switchToAmoy();
+
+    const amountBN = parseUSDC(amount);
+
+    // Step 1: Approve
+    setStatus("Step 1/2 — Approving mUSDC spend...", "info");
+    const approveTx = await contracts.amoy.mockUSDC.approve(
+      ADDRESSES.amoy.lendingPool,
+      amountBN
+    );
+    await approveTx.wait();
+    setStatus("Approved! Step 2/2 — Depositing...", "info");
+
+    // Step 2: Deposit
+    const depositTx = await contracts.amoy.lendingPool.deposit(amountBN);
+    await depositTx.wait();
+
+    setStatus(`✅ Deposited ${amount} mUSDC on Amoy!`, "success");
+    await refreshAllBalances();
+
   } catch (err) {
-    setStatus(err.message, "error");
-  } finally {
-    setLoading("btn-deposit", false);
+    setStatus("Deposit failed: " + _parseError(err), "error");
   }
-});
+}
 
-// ─── Withdraw ────────────────────────────────────────────────────────────────
-
-$("btn-withdraw").addEventListener("click", async () => {
-  const amount = $("input-withdraw").value.trim();
-  if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
-    setStatus("Enter a valid withdraw amount", "error"); return;
+// ─── PHASE 2: BORROW (cross-chain via LayerZero) ──────────────────────────────
+async function handleBorrow() {
+  const amount = document.getElementById("borrow-amount").value;
+  if (!amount || Number(amount) <= 0) {
+    setStatus("Enter a valid borrow amount.", "error");
+    return;
   }
+
   try {
-    setLoading("btn-withdraw", true);
-    setStatus("Withdrawing...", "loading");
-    const receipt = await Web3Manager.withdraw(amount);
-    showTxLink("amoy", receipt);
-    $("input-withdraw").value = "";
-    await refreshBalances();
+    setStatus("Switching to Sepolia...", "info");
+    await switchToSepolia();
+
+    const amountBN = parseUSDC(amount);
+
+    // Get LayerZero fee quote
+    setStatus("Getting LayerZero fee quote...", "info");
+    const lzFee = await contracts.sepolia.bridge.quote(
+      MSG_BORROW_REQUEST,
+      userAddress,
+      amountBN
+    );
+
+    // Add 20% buffer to fee for gas fluctuations
+    const feeWithBuffer = (lzFee * 120n) / 100n;
+
+    setStatus(
+      `LayerZero fee: ${ethers.formatEther(lzFee)} ETH. Sending borrow request...`,
+      "info"
+    );
+
+    // Send borrow request → LayerZero message to Amoy
+    const tx = await contracts.sepolia.bridge.requestBorrow(amountBN, {
+      value: feeWithBuffer,
+    });
+    const receipt = await tx.wait();
+
+    setStatus(
+      "📡 Cross-chain message sent via LayerZero! Waiting for Amoy confirmation...",
+      "info"
+    );
+
+    // Show LayerZero scan link
+    const lzLink = `https://testnet.layerzeroscan.com`;
+    document.getElementById("lz-scan-link").href = lzLink;
+    document.getElementById("lz-scan-link").style.display = "inline";
+
+    // Poll Amoy until collateral is locked (LZ delivered)
+    const locked = await pollUntilLocked(userAddress, amountBN * 2n);
+
+    if (!locked) {
+      setStatus(
+        "⚠️ Timeout waiting for Amoy lock. Check LayerZero Scan for message status.",
+        "error"
+      );
+      return;
+    }
+
+    // Collateral confirmed locked — release loan on Sepolia
+    setStatus("✅ Collateral locked on Amoy! Releasing sUSDC on Sepolia...", "info");
+
+    const releaseTx = await contracts.sepolia.lendingPool.adminReleaseLoan(
+      userAddress,
+      amountBN
+    );
+    await releaseTx.wait();
+
+    setStatus(`🎉 Done! ${amount} sUSDC received in your wallet on Sepolia!`, "success");
+    await refreshAllBalances();
+
   } catch (err) {
-    setStatus(err.message, "error");
-  } finally {
-    setLoading("btn-withdraw", false);
+    setStatus("Borrow failed: " + _parseError(err), "error");
   }
-});
+}
 
-// ─── Borrow ──────────────────────────────────────────────────────────────────
+// ─── PHASE 3: REPAY + UNLOCK (cross-chain via LayerZero) ─────────────────────
+async function handleRepay() {
+  const amount = document.getElementById("repay-amount").value;
+  if (!amount || Number(amount) <= 0) {
+    setStatus("Enter a valid repay amount.", "error");
+    return;
+  }
 
-$("btn-quote-borrow").addEventListener("click", async () => {
-  const amount = $("input-borrow").value.trim();
-  if (!amount || isNaN(amount)) { setStatus("Enter a borrow amount first", "error"); return; }
   try {
-    setLoading("btn-quote-borrow", true);
-    setStatus("Fetching LayerZero fee...", "loading");
-    const fee = await Web3Manager.quoteBorrow(amount);
-    const feeEth = parseFloat(ethers.formatEther(fee)).toFixed(6);
-    $("borrow-fee").textContent = `LayerZero fee: ~${feeEth} ETH`;
-    setStatus("Fee fetched. Proceed with borrow.", "success");
-  } catch (err) {
-    setStatus(err.message, "error");
-  } finally {
-    setLoading("btn-quote-borrow", false);
-  }
-});
+    setStatus("Switching to Sepolia...", "info");
+    await switchToSepolia();
 
-$("btn-borrow").addEventListener("click", async () => {
-  const amount = $("input-borrow").value.trim();
-  if (!amount || isNaN(amount) || parseFloat(amount) <= 0) {
-    setStatus("Enter a valid borrow amount", "error"); return;
+    const amountBN = parseUSDC(amount);
+
+    // Get current debt to check what user actually owes
+    const totalDebt = await contracts.sepolia.lendingPool.getDebt(userAddress);
+    if (totalDebt === 0n) {
+      setStatus("No active loan to repay.", "error");
+      return;
+    }
+
+    // Approve sUSDC spend (full debt amount including interest)
+    setStatus(`Step 1/3 — Approving ${formatUSDC(totalDebt)} sUSDC (includes interest)...`, "info");
+    const approveTx = await contracts.sepolia.mockUSDC.approve(
+      ADDRESSES.sepolia.lendingPool,
+      totalDebt
+    );
+    await approveTx.wait();
+
+    // Get LZ fee for unlock message
+    const lzFee = await contracts.sepolia.bridge.quote(
+      MSG_REPAY_UNLOCK,
+      userAddress,
+      amountBN
+    );
+    const feeWithBuffer = (lzFee * 120n) / 100n;
+
+    // Repay + send LayerZero unlock message to Amoy
+    setStatus("Step 2/3 — Repaying loan + sending unlock message via LayerZero...", "info");
+    const repayTx = await contracts.sepolia.bridge.repayAndUnlock(amountBN, {
+      value: feeWithBuffer,
+    });
+    await repayTx.wait();
+
+    setStatus(
+      "📡 Unlock message sent to Amoy via LayerZero! Waiting for confirmation...",
+      "info"
+    );
+
+    // Poll Amoy until collateral is unlocked
+    const unlocked = await pollUntilUnlocked(userAddress);
+
+    if (!unlocked) {
+      setStatus(
+        "⚠️ Timeout waiting for Amoy unlock. Check LayerZero Scan.",
+        "error"
+      );
+      return;
+    }
+
+    setStatus(
+      "🎉 Step 3/3 — Collateral unlocked on Amoy! You can now withdraw.",
+      "success"
+    );
+    await refreshAllBalances();
+
+  } catch (err) {
+    setStatus("Repay failed: " + _parseError(err), "error");
   }
+}
+
+// ─── PHASE 4: WITHDRAW ────────────────────────────────────────────────────────
+async function handleWithdraw() {
+  const amount = document.getElementById("withdraw-amount").value;
+  if (!amount || Number(amount) <= 0) {
+    setStatus("Enter a valid withdraw amount.", "error");
+    return;
+  }
+
   try {
-    setLoading("btn-borrow", true);
-    setStatus("Sending cross-chain borrow request via LayerZero...", "loading");
-    const receipt = await Web3Manager.requestBorrow(amount);
-    showTxLink("sepolia", receipt);
-    $("input-borrow").value = "";
-    $("borrow-fee").textContent = "";
-    setStatus("✅ Borrow request sent! LayerZero is relaying to Amoy. Funds arrive in ~1-2 minutes.", "success");
-    await refreshBalances();
+    setStatus("Switching to Amoy...", "info");
+    await switchToAmoy();
+
+    const amountBN = parseUSDC(amount);
+
+    setStatus("Withdrawing mUSDC + earned interest from Amoy...", "info");
+    const tx = await contracts.amoy.lendingPool.withdraw(amountBN);
+    await tx.wait();
+
+    setStatus(`✅ Withdrawn ${amount} mUSDC + interest from Amoy!`, "success");
+    await refreshAllBalances();
+
   } catch (err) {
-    setStatus(err.message, "error");
-  } finally {
-    setLoading("btn-borrow", false);
+    setStatus("Withdraw failed: " + _parseError(err), "error");
   }
-});
+}
 
-// ─── Repay & Unlock ──────────────────────────────────────────────────────────
+// ─── POLLING: Wait Until Locked ───────────────────────────────────────────────
+/**
+ * Polls Amoy LendingPool.locked(user) every 10 seconds.
+ * Returns true when locked >= expectedAmount.
+ * Returns false after 5 minute timeout.
+ *
+ * 10s interval chosen to avoid RPC 429 rate limiting on free tier.
+ */
+async function pollUntilLocked(user, expectedLockedAmount) {
+  const amoyRead = getAmoyReadContracts();
+  const startTime = Date.now();
+  isPolling = true;
 
-$("btn-repay").addEventListener("click", async () => {
-  const collateral = $("input-repay-collateral").value.trim();
-  if (!collateral || isNaN(collateral) || parseFloat(collateral) <= 0) {
-    setStatus("Enter the collateral amount to unlock on Amoy", "error"); return;
-  }
+  setStatus("⏳ Polling Amoy for lock confirmation (checking every 10s)...", "info");
+
+  // Get locked amount before polling starts (baseline)
+  let baselineLocked = 0n;
   try {
-    setLoading("btn-repay", true);
-    setStatus("Approving repayment & sending unlock message via LayerZero...", "loading");
-    const receipt = await Web3Manager.repayAndUnlock(collateral);
-    showTxLink("sepolia", receipt);
-    $("input-repay-collateral").value = "";
-    setStatus("✅ Repaid! LayerZero is signaling Amoy to unlock your collateral. Ready in ~1-2 minutes.", "success");
-    await refreshBalances();
-  } catch (err) {
-    setStatus(err.message, "error");
-  } finally {
-    setLoading("btn-repay", false);
+    baselineLocked = await amoyRead.lendingPool.getLockedBalance(user);
+  } catch (_) {}
+
+  while (isPolling) {
+    // Timeout check
+    if (Date.now() - startTime > POLL_TIMEOUT_MS) {
+      isPolling = false;
+      return false;
+    }
+
+    await sleep(POLL_INTERVAL_MS);
+
+    try {
+      const currentLocked = await amoyRead.lendingPool.getLockedBalance(user);
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+      setStatus(
+        `⏳ Waiting for LayerZero delivery... (${elapsed}s elapsed, locked: ${formatUSDC(currentLocked)} mUSDC)`,
+        "info"
+      );
+
+      if (currentLocked >= expectedLockedAmount) {
+        isPolling = false;
+        return true;
+      }
+    } catch (err) {
+      // RPC hiccup — log and continue polling
+      console.warn("Poll error (will retry):", err.message);
+    }
   }
-});
 
-// ─── Mint Test Tokens (Faucet) ────────────────────────────────────────────────
+  return false;
+}
 
-$("btn-mint-amoy").addEventListener("click", async () => {
-  try {
-    setLoading("btn-mint-amoy", true);
-    setStatus("Minting 10,000 mUSDC on Amoy...", "loading");
-    const receipt = await Web3Manager.mintTestTokens("amoy", "10000");
-    showTxLink("amoy", receipt);
-    await refreshBalances();
-  } catch (err) {
-    setStatus(err.message, "error");
-  } finally {
-    setLoading("btn-mint-amoy", false);
+// ─── POLLING: Wait Until Unlocked ────────────────────────────────────────────
+async function pollUntilUnlocked(user) {
+  const amoyRead = getAmoyReadContracts();
+  const startTime = Date.now();
+  isPolling = true;
+
+  setStatus("⏳ Polling Amoy for unlock confirmation (checking every 10s)...", "info");
+
+  while (isPolling) {
+    if (Date.now() - startTime > POLL_TIMEOUT_MS) {
+      isPolling = false;
+      return false;
+    }
+
+    await sleep(POLL_INTERVAL_MS);
+
+    try {
+      const currentLocked = await amoyRead.lendingPool.getLockedBalance(user);
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+      setStatus(
+        `⏳ Waiting for unlock... (${elapsed}s elapsed, still locked: ${formatUSDC(currentLocked)} mUSDC)`,
+        "info"
+      );
+
+      if (currentLocked === 0n) {
+        isPolling = false;
+        return true;
+      }
+    } catch (err) {
+      console.warn("Poll error (will retry):", err.message);
+    }
   }
-});
 
-$("btn-mint-sepolia").addEventListener("click", async () => {
-  try {
-    setLoading("btn-mint-sepolia", true);
-    setStatus("Minting 10,000 sUSDC on Sepolia...", "loading");
-    const receipt = await Web3Manager.mintTestTokens("sepolia", "10000");
-    showTxLink("sepolia", receipt);
-    await refreshBalances();
-  } catch (err) {
-    setStatus(err.message, "error");
-  } finally {
-    setLoading("btn-mint-sepolia", false);
+  return false;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function setStatus(message, type = "info") {
+  const el = document.getElementById("status-message");
+  if (!el) return;
+  el.textContent = message;
+  el.className = "status-box status-" + type;
+  el.style.display = "block";
+  console.log(`[${type.toUpperCase()}] ${message}`);
+}
+
+function resetUI() {
+  document.getElementById("wallet-address").textContent = "Not connected";
+  document.getElementById("connect-btn").textContent = "Connect Wallet";
+  document.getElementById("connect-btn").disabled = false;
+}
+
+function _parseError(err) {
+  // Surface clean error messages from contract reverts
+  if (err?.reason) return err.reason;
+  if (err?.data?.message) return err.data.message;
+  if (err?.message) {
+    // Trim long ethers error messages
+    const msg = err.message;
+    if (msg.includes("user rejected")) return "Transaction rejected by user.";
+    if (msg.includes("insufficient funds")) return "Insufficient ETH/MATIC for gas.";
+    if (msg.includes("NotEnoughNative")) return "Insufficient ETH for LayerZero fee.";
+    if (msg.includes("OnlyPeer")) return "Bridge peer not set correctly.";
+    return msg.slice(0, 120);
   }
-});
+  return "Unknown error.";
+}
 
-// ─── Nav Tabs ────────────────────────────────────────────────────────────────
-
-document.querySelectorAll(".nav-tab").forEach(tab => {
-  tab.addEventListener("click", () => {
-    showPanel(tab.dataset.panel);
-  });
-});
-
-// ─── Init ────────────────────────────────────────────────────────────────────
-
-showPanel("panel-amoy");
+function stopPolling() {
+  isPolling = false;
+}

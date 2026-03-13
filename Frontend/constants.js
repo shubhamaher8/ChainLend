@@ -1,77 +1,93 @@
-// frontend/constants.js
+// ─── ChainLend Constants ─────────────────────────────────────────────────────
 
-// ─── Network Config ──────────────────────────────────────────────────────────
+// ─── Network Config ───────────────────────────────────────────────────────────
 const NETWORKS = {
   amoy: {
-    chainId: "0x13882",
-    chainName: "Polygon Amoy",
+    chainId: "0x13882", // 80002 in hex
+    chainName: "Polygon Amoy Testnet",
     rpcUrls: ["https://rpc-amoy.polygon.technology"],
-    nativeCurrency: { name: "POL", symbol: "POL", decimals: 18 },
+    nativeCurrency: { name: "MATIC", symbol: "MATIC", decimals: 18 },
     blockExplorerUrls: ["https://amoy.polygonscan.com"],
   },
   sepolia: {
-    chainId: "0xaa36a7",
-    chainName: "Ethereum Sepolia",
+    chainId: "0xaa36a7", // 11155111 in hex
+    chainName: "Ethereum Sepolia Testnet",
     rpcUrls: ["https://rpc.sepolia.org"],
     nativeCurrency: { name: "SepoliaETH", symbol: "ETH", decimals: 18 },
     blockExplorerUrls: ["https://sepolia.etherscan.io"],
   },
 };
 
-// ─── Deployed Contract Addresses ─────────────────────────────────────────────
+// ─── Contract Addresses ───────────────────────────────────────────────────────
 const ADDRESSES = {
   amoy: {
-    mockUSDC:    "0x255447fD05AE643662a351e8b33730297283C4be",
-    lendingPool: "0x4851d5211dfe3fa12E1eAA3e97aFAA55889de9AA",
-    bridge:      "0xaAFE5a3d4bD40092A637c60A6f331FF7e20a9d78",
+    mockUSDC:     "0x26b37304CF6d608098c47E55A93D68e410A4879B",
+    lendingPool:  "0xc459C937Fe31Dbc67285b023F325fFAF52D7EfdB",
+    bridge:       "0xe5c7BeF3C839Bc1a6915B4211c3D74Ca77B5975a",
   },
   sepolia: {
-    mockUSDC:    "0xef2B880E4653381A613Abd215aE5f13ce6d5Ef9d",
-    lendingPool: "0xDf4C577D550dC83A0f37E43C6B4401b09CBBc7da",
-    bridge:      "0x9a1b3f3Cd7120c184c38f585949079c0264ACd0A",
+    mockUSDC:     "0x013906BDE4a34b1dE06A7A8eDB0958337eb7FCA8",
+    lendingPool:  "0x4Dda8ef41E5B1fDbC97901Ab04D7285bc6f31957",
+    bridge:       "0xba029eF4dA8f8771217A37ebc5196E42ec6ada0a",
   },
 };
 
+// ─── Protocol Params ──────────────────────────────────────────────────────────
+const LTV_PERCENT        = 50;     // 50% — borrow up to half of collateral
+const DEPOSIT_APY        = 5;      // 5% APY on deposits
+const BORROW_APR         = 8;      // 8% APR on borrows
+const USDC_DECIMALS      = 6;
+const USDC_UNIT          = 10n ** 6n; // 1 USDC = 1_000_000 units
+
+// ─── Polling Config ───────────────────────────────────────────────────────────
+const POLL_INTERVAL_MS   = 10_000; // 10 seconds — avoids RPC 429 rate limit
+const POLL_TIMEOUT_MS    = 300_000; // 5 minutes max wait
+
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
-const ABIS = {
-  MockUSDC: [
-    "function balanceOf(address) view returns (uint256)",
-    "function approve(address spender, uint256 amount) returns (bool)",
-    "function allowance(address owner, address spender) view returns (uint256)",
-    "function decimals() view returns (uint8)",
-    "function symbol() view returns (string)",
-    "function mint(address to, uint256 amount)",
-  ],
 
-  LendingPool: [
-    "function deposit(uint256 amount)",
-    "function withdraw(uint256 amount)",
-    "function getBalance(address user) view returns (uint256 available, uint256 locked, uint256 accruedInterest)",
-    "function getMaxBorrow(uint256 collateralAmount) pure returns (uint256)",
-    "function getDebt(address user) view returns (uint256 principal, uint256 interest)",
-    "event Deposited(address indexed user, uint256 amount)",
-    "event Withdrawn(address indexed user, uint256 amount, uint256 interest)",
-    "event Borrowed(address indexed user, uint256 amount)",
-    "event Repaid(address indexed user, uint256 principal, uint256 interest)",
-  ],
+const ERC20_ABI = [
+  "function balanceOf(address) view returns (uint256)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function decimals() view returns (uint8)",
+  "function symbol() view returns (string)",
+];
 
-  ChainLendBridge: [
-    "function requestBorrow(uint256 borrowAmount) payable",
-    "function repayAndUnlock(uint256 collateralAmount) payable",
-    "function quoteBorrow(uint256 borrowAmount) view returns (uint256 nativeFee)",
-    "event BorrowRequested(address indexed user, uint256 amount, uint256 collateralRequired)",
-    "event RepayAndUnlockInitiated(address indexed user, uint256 collateralAmount)",
-  ],
-};
+const AMOY_LENDING_POOL_ABI = [
+  "function deposit(uint256 amount)",
+  "function withdraw(uint256 amount)",
+  "function lock(address user, uint256 amount)",
+  "function unlock(address user, uint256 amount)",
+  "function getAvailableBalance(address user) view returns (uint256)",
+  "function getLockedBalance(address user) view returns (uint256)",
+  "function getAccruedInterest(address user) view returns (uint256)",
+  "function deposits(address) view returns (uint256 amount, uint256 interestSnapshot, uint256 lastSnapshotTime)",
+  "function locked(address) view returns (uint256)",
+  "event Deposited(address indexed user, uint256 amount)",
+  "event Withdrawn(address indexed user, uint256 amount, uint256 interest)",
+  "event Locked(address indexed user, uint256 amount)",
+  "event Unlocked(address indexed user, uint256 amount)",
+];
 
-// ─── Protocol Constants ───────────────────────────────────────────────────────
-const PROTOCOL = {
-  USDC_DECIMALS:   6,
-  DEPOSIT_APY_PCT: 5,
-  BORROW_APR_PCT:  8,
-  MAX_LTV_PCT:     50,
-};
+const SEPOLIA_LENDING_POOL_ABI = [
+  "function adminReleaseLoan(address user, uint256 amount)",
+  "function repay(uint256 amount)",
+  "function getDebt(address user) view returns (uint256)",
+  "function getLoanInfo(address user) view returns (uint256 principal, uint256 totalDebt, uint256 startTime)",
+  "function getPoolLiquidity() view returns (uint256)",
+  "function loans(address) view returns (uint256 principal, uint256 interestSnapshot, uint256 lastSnapshotTime)",
+  "event LoanReleased(address indexed user, uint256 amount)",
+  "event LoanRepaid(address indexed user, uint256 principal, uint256 interest)",
+];
 
-if (typeof module !== "undefined") {
-  module.exports = { NETWORKS, ADDRESSES, ABIS, PROTOCOL };
-}
+const SEPOLIA_BRIDGE_ABI = [
+  "function requestBorrow(uint256 amount) payable returns (bytes32 guid)",
+  "function repayAndUnlock(uint256 amount) payable",
+  "function quote(uint8 msgType, address user, uint256 amount) view returns (uint256 nativeFee)",
+  "event BorrowRequested(address indexed user, uint256 amount, bytes32 guid)",
+  "event RepayUnlockSent(address indexed user, uint256 amount, bytes32 guid)",
+];
+
+// Message types (matches contract constants)
+const MSG_BORROW_REQUEST = 1;
+const MSG_REPAY_UNLOCK   = 3;

@@ -1,243 +1,157 @@
-// frontend/web3.js
-// All blockchain interaction logic — wallet, contracts, transactions
-// Requires: ethers (loaded via CDN in index.html), constants.js
+// ─── ChainLend Web3 Layer ─────────────────────────────────────────────────────
+// Handles wallet connection and contract instances using ethers.js v6
 
-const Web3Manager = (() => {
-  let provider = null;
-  let signer   = null;
-  let userAddress = null;
+let provider = null;
+let signer   = null;
+let userAddress = null;
 
-  // ─── Wallet ────────────────────────────────────────────────────────────────
+// Contract instances — populated after wallet connects
+let amoyReadProvider    = null; // read-only provider for Amoy polling
+let contracts = {
+  amoy: {
+    mockUSDC:    null,
+    lendingPool: null,
+  },
+  sepolia: {
+    mockUSDC:    null,
+    lendingPool: null,
+    bridge:      null,
+  },
+};
 
-  async function connectWallet() {
-    if (!window.ethereum) throw new Error("MetaMask not detected. Please install MetaMask.");
-
-    provider    = new ethers.BrowserProvider(window.ethereum);
-    const accounts = await provider.send("eth_requestAccounts", []);
-    signer      = await provider.getSigner();
-    userAddress = accounts[0];
-
-    // Listen for account/chain changes
-    window.ethereum.on("accountsChanged", () => window.location.reload());
-    window.ethereum.on("chainChanged",    () => window.location.reload());
-
-    return userAddress;
+// ─── Connect Wallet ───────────────────────────────────────────────────────────
+async function connectWallet() {
+  if (!window.ethereum) {
+    throw new Error("MetaMask not found. Please install MetaMask.");
   }
 
-  async function getCurrentChainId() {
-    if (!provider) throw new Error("Wallet not connected");
-    const network = await provider.getNetwork();
-    return Number(network.chainId);
-  }
+  provider = new ethers.BrowserProvider(window.ethereum);
+  await provider.send("eth_requestAccounts", []);
+  signer      = await provider.getSigner();
+  userAddress = await signer.getAddress();
 
-  async function switchNetwork(networkKey) {
-    const net = NETWORKS[networkKey];
-    try {
+  // Read-only provider for Amoy (used for polling — no signer needed)
+  amoyReadProvider = new ethers.JsonRpcProvider(
+    NETWORKS.amoy.rpcUrls[0]
+  );
+
+  return userAddress;
+}
+
+// ─── Switch Network ───────────────────────────────────────────────────────────
+async function switchToAmoy() {
+  await _switchNetwork(NETWORKS.amoy);
+  provider = new ethers.BrowserProvider(window.ethereum);
+  signer   = await provider.getSigner();
+  _initAmoyContracts(signer);
+}
+
+async function switchToSepolia() {
+  await _switchNetwork(NETWORKS.sepolia);
+  provider = new ethers.BrowserProvider(window.ethereum);
+  signer   = await provider.getSigner();
+  _initSepoliaContracts(signer);
+}
+
+async function _switchNetwork(network) {
+  try {
+    await window.ethereum.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: network.chainId }],
+    });
+  } catch (err) {
+    // Chain not added to MetaMask yet — add it
+    if (err.code === 4902) {
       await window.ethereum.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: net.chainId }],
+        method: "wallet_addEthereumChain",
+        params: [network],
       });
-    } catch (err) {
-      if (err.code === 4902) {
-        await window.ethereum.request({
-          method: "wallet_addEthereumChain",
-          params: [net],
-        });
-      } else {
-        throw err;
-      }
+    } else {
+      throw err;
     }
   }
+}
 
-  // ─── Contract Getters ─────────────────────────────────────────────────────
+// ─── Init Contracts ───────────────────────────────────────────────────────────
+function _initAmoyContracts(signerOrProvider) {
+  contracts.amoy.mockUSDC = new ethers.Contract(
+    ADDRESSES.amoy.mockUSDC,
+    ERC20_ABI,
+    signerOrProvider
+  );
+  contracts.amoy.lendingPool = new ethers.Contract(
+    ADDRESSES.amoy.lendingPool,
+    AMOY_LENDING_POOL_ABI,
+    signerOrProvider
+  );
+}
 
-  function getContract(name, networkKey) {
-    if (!signer) throw new Error("Wallet not connected");
-    const address = ADDRESSES[networkKey][name === "mockUSDC" ? "mockUSDC"
-                             : name === "lendingPool" ? "lendingPool"
-                             : "bridge"];
-    const abi = ABIS[
-      name === "mockUSDC"    ? "MockUSDC"
-    : name === "lendingPool" ? "LendingPool"
-    : "ChainLendBridge"
-    ];
-    return new ethers.Contract(address, abi, signer);
-  }
+function _initSepoliaContracts(signerOrProvider) {
+  contracts.sepolia.mockUSDC = new ethers.Contract(
+    ADDRESSES.sepolia.mockUSDC,
+    ERC20_ABI,
+    signerOrProvider
+  );
+  contracts.sepolia.lendingPool = new ethers.Contract(
+    ADDRESSES.sepolia.lendingPool,
+    SEPOLIA_LENDING_POOL_ABI,
+    signerOrProvider
+  );
+  contracts.sepolia.bridge = new ethers.Contract(
+    ADDRESSES.sepolia.bridge,
+    SEPOLIA_BRIDGE_ABI,
+    signerOrProvider
+  );
+}
 
-  // ─── Amoy (Collateral Chain) Functions ────────────────────────────────────
-
-  async function getAmoyBalances() {
-    if (!userAddress) throw new Error("Wallet not connected");
-
-    const usdc = getContract("mockUSDC", "amoy");
-    const pool = getContract("lendingPool", "amoy");
-
-    const [walletBal, poolBal] = await Promise.all([
-      usdc.balanceOf(userAddress),
-      pool.getBalance(userAddress),
-    ]);
-
-    return {
-      walletBalance:   formatUSDC(walletBal),
-      available:       formatUSDC(poolBal.available),
-      locked:          formatUSDC(poolBal.locked),
-      accruedInterest: formatUSDC(poolBal.accruedInterest),
-    };
-  }
-
-  async function deposit(amountHuman) {
-    const amount   = parseUSDC(amountHuman);
-    const usdc     = getContract("mockUSDC", "amoy");
-    const pool     = getContract("lendingPool", "amoy");
-    const poolAddr = ADDRESSES.amoy.lendingPool;
-    const gasOpts  = {
-      maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"),
-      maxFeePerGas:         ethers.parseUnits("50", "gwei"),
-    };
-
-    const allowance = await usdc.allowance(userAddress, poolAddr);
-    if (allowance < amount) {
-      const approveTx = await usdc.approve(poolAddr, ethers.MaxUint256, gasOpts);
-      await approveTx.wait();
-    }
-
-    const tx = await pool.deposit(amount, gasOpts);
-    return tx.wait();
-  }
-
-  async function withdraw(amountHuman) {
-    const amount = parseUSDC(amountHuman);
-    const pool   = getContract("lendingPool", "amoy");
-    const tx     = await pool.withdraw(amount, {
-      maxPriorityFeePerGas: ethers.parseUnits("30", "gwei"),
-      maxFeePerGas:         ethers.parseUnits("50", "gwei"),
-    });
-    return tx.wait();
-  }
-
-  // ─── Sepolia (Loan Chain) Functions ───────────────────────────────────────
-
-  async function getSepoliaBalances() {
-    if (!userAddress) throw new Error("Wallet not connected");
-
-    const usdc = getContract("mockUSDC", "sepolia");
-    const pool = getContract("lendingPool", "sepolia");
-
-    const [walletBal, debt] = await Promise.all([
-      usdc.balanceOf(userAddress),
-      pool.getDebt(userAddress),
-    ]);
-
-    return {
-      walletBalance: formatUSDC(walletBal),
-      debtPrincipal: formatUSDC(debt.principal),
-      debtInterest:  formatUSDC(debt.interest),
-      totalDebt:     formatUSDC(debt.principal + debt.interest),
-    };
-  }
-
-  async function quoteBorrow(amountHuman) {
-    const amount = parseUSDC(amountHuman);
-    const bridge = getContract("bridge", "sepolia");
-    const feeBig = await bridge.quoteBorrow(amount);
-    return feeBig;
-  }
-
-  async function requestBorrow(amountHuman) {
-    const amount = parseUSDC(amountHuman);
-    const bridge = getContract("bridge", "sepolia");
-
-    // Get LayerZero fee with 20% buffer
-    const fee           = await bridge.quoteBorrow(amount);
-    const feeWithBuffer = fee + (fee / 5n);
-
-    // FIX: manual gasLimit stops ethers from running estimateGas,
-    // which was failing because it simulates with msg.value = 0
-    const tx = await bridge.requestBorrow(amount, {
-      value:    feeWithBuffer,
-      gasLimit: 500000n,
-    });
-    return tx.wait();
-  }
-
-  async function repayAndUnlock(collateralAmountHuman) {
-    const collateral = parseUSDC(collateralAmountHuman);
-    const usdc       = getContract("mockUSDC", "sepolia");
-    const pool       = getContract("lendingPool", "sepolia");
-    const bridge     = getContract("bridge", "sepolia");
-    const poolAddr   = ADDRESSES.sepolia.lendingPool;
-
-    // 1. Get total debt
-    const debt  = await pool.getDebt(userAddress);
-    const total = debt.principal + debt.interest;
-
-    // 2. Approve LendingPool to pull repayment from user wallet
-    const allowance = await usdc.allowance(userAddress, poolAddr);
-    if (allowance < total) {
-      const approveTx = await usdc.approve(poolAddr, ethers.MaxUint256);
-      await approveTx.wait();
-    }
-
-    // 3. Quote LayerZero fee for unlock message with 20% buffer
-    const lzFee         = await bridge.quoteBorrow(collateral);
-    const feeWithBuffer = lzFee + (lzFee / 5n);
-
-    // 4. Call repayAndUnlock — manual gasLimit to skip broken estimateGas
-    const tx = await bridge.repayAndUnlock(collateral, {
-      value:    feeWithBuffer,
-      gasLimit: 500000n,
-    });
-    return tx.wait();
-  }
-
-  // ─── Mint Test Tokens (testnet only) ─────────────────────────────────────
-
-  async function mintTestTokens(networkKey, amountHuman) {
-    const amount = parseUSDC(amountHuman);
-    const usdcWithMint = new ethers.Contract(
-      ADDRESSES[networkKey].mockUSDC,
-      ABIS.MockUSDC,
-      signer
-    );
-    const tx = await usdcWithMint.mint(userAddress, amount);
-    return tx.wait();
-  }
-
-  // ─── Helpers ──────────────────────────────────────────────────────────────
-
-  function parseUSDC(human) {
-    return ethers.parseUnits(String(human), PROTOCOL.USDC_DECIMALS);
-  }
-
-  function formatUSDC(raw) {
-    return parseFloat(ethers.formatUnits(raw, PROTOCOL.USDC_DECIMALS)).toFixed(2);
-  }
-
-  function shortenAddress(addr) {
-    if (!addr) return "";
-    return addr.slice(0, 6) + "..." + addr.slice(-4);
-  }
-
-  function getExplorerTxUrl(networkKey, txHash) {
-    const base = NETWORKS[networkKey].blockExplorerUrls[0];
-    return `${base}/tx/${txHash}`;
-  }
-
-  // ─── Public API ───────────────────────────────────────────────────────────
+// ─── Read-only Amoy contracts (for polling, no MetaMask needed) ───────────────
+function getAmoyReadContracts() {
   return {
-    connectWallet,
-    getCurrentChainId,
-    switchNetwork,
-    getAmoyBalances,
-    deposit,
-    withdraw,
-    getSepoliaBalances,
-    quoteBorrow,
-    requestBorrow,
-    repayAndUnlock,
-    mintTestTokens,
-    shortenAddress,
-    getExplorerTxUrl,
-    get userAddress() { return userAddress; },
+    lendingPool: new ethers.Contract(
+      ADDRESSES.amoy.lendingPool,
+      AMOY_LENDING_POOL_ABI,
+      amoyReadProvider
+    ),
   };
-})();
+}
+
+// ─── Get Current Chain ID ─────────────────────────────────────────────────────
+async function getCurrentChainId() {
+  const network = await provider.getNetwork();
+  return Number(network.chainId);
+}
+
+async function isOnAmoy() {
+  const chainId = await getCurrentChainId();
+  return chainId === 80002;
+}
+
+async function isOnSepolia() {
+  const chainId = await getCurrentChainId();
+  return chainId === 11155111;
+}
+
+// ─── Format / Parse helpers ───────────────────────────────────────────────────
+function formatUSDC(rawAmount) {
+  // rawAmount is BigInt with 6 decimals → human readable string
+  return (Number(rawAmount) / 1_000_000).toFixed(2);
+}
+
+function parseUSDC(humanAmount) {
+  // humanAmount is string/number → BigInt with 6 decimals
+  return ethers.parseUnits(String(humanAmount), 6);
+}
+
+// ─── Listen for account / network changes ────────────────────────────────────
+function setupWalletListeners(onAccountChange, onChainChange) {
+  if (!window.ethereum) return;
+
+  window.ethereum.on("accountsChanged", (accounts) => {
+    userAddress = accounts[0] || null;
+    if (onAccountChange) onAccountChange(userAddress);
+  });
+
+  window.ethereum.on("chainChanged", (chainId) => {
+    if (onChainChange) onChainChange(parseInt(chainId, 16));
+  });
+}
