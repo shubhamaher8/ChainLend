@@ -57,31 +57,37 @@ async function refreshAllBalances() {
     document.getElementById("max-borrow").textContent =
       formatUSDC(maxBorrow) + " sUSDC";
 
-    // Sepolia balances — use read-only provider
-    const sepoliaReadProvider = new ethers.JsonRpcProvider(
-      NETWORKS.sepolia.rpcUrls[0]
-    );
-    const sepoliaLP = new ethers.Contract(
-      ADDRESSES.sepolia.lendingPool,
-      SEPOLIA_LENDING_POOL_ABI,
-      sepoliaReadProvider
-    );
-    const sepoliaUSDC = new ethers.Contract(
-      ADDRESSES.sepolia.mockUSDC,
-      ERC20_ABI,
-      sepoliaReadProvider
-    );
+    // Sepolia balances — separate try/catch so Amoy balances always show
+    try {
+      const sepoliaReadProvider = new ethers.JsonRpcProvider(
+        "https://ethereum-sepolia-rpc.publicnode.com"
+      );
+      const sepoliaLP = new ethers.Contract(
+        ADDRESSES.sepolia.lendingPool,
+        SEPOLIA_LENDING_POOL_ABI,
+        sepoliaReadProvider
+      );
+      const sepoliaUSDC = new ethers.Contract(
+        ADDRESSES.sepolia.mockUSDC,
+        ERC20_ABI,
+        sepoliaReadProvider
+      );
 
-    const [debt, sepoliaBalance] = await Promise.all([
-      sepoliaLP.getDebt(userAddress),
-      sepoliaUSDC.balanceOf(userAddress),
-    ]);
+      const [debt, sepoliaBalance] = await Promise.all([
+        sepoliaLP.getDebt(userAddress),
+        sepoliaUSDC.balanceOf(userAddress),
+      ]);
 
-    document.getElementById("sepolia-debt").textContent =
-      formatUSDC(debt) + " sUSDC";
-    document.getElementById("sepolia-balance").textContent =
-      formatUSDC(sepoliaBalance) + " sUSDC";
+      document.getElementById("sepolia-debt").textContent =
+        formatUSDC(debt) + " sUSDC";
+      document.getElementById("sepolia-balance").textContent =
+        formatUSDC(sepoliaBalance) + " sUSDC";
 
+    } catch (sepoliaErr) {
+      console.error("Sepolia balance fetch failed:", sepoliaErr.message);
+      document.getElementById("sepolia-balance").textContent = "RPC error — refresh";
+      document.getElementById("sepolia-debt").textContent = "RPC error — refresh";
+    }
   } catch (err) {
     console.error("Balance refresh error:", err);
   }
@@ -217,10 +223,10 @@ async function handleRepay() {
       return;
     }
 
-    // Approve sUSDC spend (full debt amount including interest)
+    // Approve sUSDC spend — approve LendingPool directly (it pulls from user wallet)
     setStatus(`Step 1/3 — Approving ${formatUSDC(totalDebt)} sUSDC (includes interest)...`, "info");
     const approveTx = await contracts.sepolia.mockUSDC.approve(
-      ADDRESSES.sepolia.lendingPool,
+      ADDRESSES.sepolia.lendingPool,  // pool pulls tokens from user
       totalDebt
     );
     await approveTx.wait();
