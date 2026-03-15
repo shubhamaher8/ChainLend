@@ -92,28 +92,31 @@ contract SepoliaLendingPool is Ownable, ReentrancyGuard {
 
     // ─── Core: Repay ─────────────────────────────────────────────────
     /**
-     * @notice User repays their sUSDC loan + accrued interest.
-     * @dev After repay, Sepolia Bridge sends LZ message to unlock Amoy collateral.
-     *      This function only handles the token collection and state clearing.
+     * @notice Bridge calls this to repay a user's loan.
+     * @dev msg.sender must be the bridge (onlyBridge security).
+     *      Pulls sUSDC directly from user's wallet via safeTransferFrom.
+     *      User must have approved SepoliaLendingPool before calling.
      */
-    function repay(uint256 amount) external nonReentrant {
-        LoanInfo storage loan = loans[msg.sender];
+    function repay(address user, uint256 amount) external nonReentrant {
+        require(msg.sender == bridge, "Only bridge can call repay");
+
+        LoanInfo storage loan = loans[user];
         require(loan.principal > 0, "No active loan");
 
-        uint256 totalDebt = getDebt(msg.sender);
+        uint256 totalDebt = getDebt(user);
         require(amount >= totalDebt, "Amount less than total debt");
 
         uint256 principal = loan.principal;
         uint256 interest  = totalDebt - principal;
 
         // Clear loan state BEFORE transfer (reentrancy protection)
-        delete loans[msg.sender];
+        delete loans[user];
         totalBorrowed -= principal;
 
-        // Collect repayment
-        token.safeTransferFrom(msg.sender, address(this), totalDebt);
+        // Pull repayment directly from user wallet
+        token.safeTransferFrom(user, address(this), totalDebt);
 
-        emit LoanRepaid(msg.sender, principal, interest);
+        emit LoanRepaid(user, principal, interest);
     }
 
     // ─── View: Get Total Debt ─────────────────────────────────────────

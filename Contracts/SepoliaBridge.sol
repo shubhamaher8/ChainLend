@@ -7,7 +7,7 @@ import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/Opti
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 interface ISepoliaLendingPool {
-    function repay(uint256 amount) external;
+    function repay(address user, uint256 amount) external; // pass user explicitly
     function getDebt(address user) external view returns (uint256);
     function loans(address user) external view returns (uint256 principal, uint256 interestSnapshot, uint256 lastSnapshotTime);
 }
@@ -124,8 +124,8 @@ contract ChainLendBridge is OApp {
         require(amount > 0, "Zero amount");
         require(msg.value > 0, "Must pay LayerZero fee");
 
-        // Step 1: Collect repayment on Sepolia (handles token transfer)
-        lendingPool.repay(amount);
+        // Step 1: Collect repayment on Sepolia (pass msg.sender — bridge is caller, not user)
+        lendingPool.repay(msg.sender, amount);
 
         // Step 2: Send unlock signal to Amoy via LayerZero
         bytes memory payload = abi.encode(MSG_REPAY_UNLOCK, msg.sender, amount);
@@ -155,7 +155,7 @@ contract ChainLendBridge is OApp {
         bytes calldata /*_message*/,
         address /*_executor*/,
         bytes calldata /*_extraData*/
-    ) internal override {
+    ) internal pure override {
         revert("Sepolia bridge does not receive messages");
     }
 
