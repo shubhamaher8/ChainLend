@@ -268,8 +268,21 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   outline: none;
   transition: border-color 0.2s;
 }
-.input-row input:focus { border-color: var(--sepolia); }
-.input-row input::placeholder { color: var(--text-muted); }
+.debt-display {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+.debt-display strong {
+  color: var(--error);
+  font-family: monospace;
+}
+
+.btn-full { width: 100%; }
 
 /* ─── How It Works ──────────────────────────────────────────────────────────── */
 .how-it-works {

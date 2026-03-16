@@ -83,6 +83,14 @@ async function refreshAllBalances() {
       document.getElementById("sepolia-balance").textContent =
         formatUSDC(sepoliaBalance) + " sUSDC";
 
+      // Update repay button debt display
+      const repayEl = document.getElementById("repay-debt-amount");
+      if (repayEl) {
+        repayEl.textContent = debt > 0n
+          ? formatUSDC(debt) + " sUSDC"
+          : "No active loan";
+      }
+
     } catch (sepoliaErr) {
       console.error("Sepolia balance fetch failed:", sepoliaErr.message);
       document.getElementById("sepolia-balance").textContent = "RPC error — refresh";
@@ -204,44 +212,43 @@ async function handleBorrow() {
 
 // ─── PHASE 3: REPAY + UNLOCK (cross-chain via LayerZero) ─────────────────────
 async function handleRepay() {
-  const amount = document.getElementById("repay-amount").value;
-  if (!amount || Number(amount) <= 0) {
-    setStatus("Enter a valid repay amount.", "error");
-    return;
-  }
-
   try {
     setStatus("Switching to Sepolia...", "info");
     await switchToSepolia();
 
-    const amountBN = parseUSDC(amount);
-
-    // Get current debt to check what user actually owes
+    // Auto-fetch exact debt from contract — never trust user input for this
     const totalDebt = await contracts.sepolia.lendingPool.getDebt(userAddress);
     if (totalDebt === 0n) {
       setStatus("No active loan to repay.", "error");
       return;
     }
 
-    // Approve sUSDC spend — approve LendingPool directly (it pulls from user wallet)
-    setStatus(`Step 1/3 — Approving ${formatUSDC(totalDebt)} sUSDC (includes interest)...`, "info");
+    const principal = await contracts.sepolia.lendingPool.loans(userAddress)
+      .then(l => l.principal);
+
+    setStatus(
+      `Total debt to repay: ${formatUSDC(totalDebt)} sUSDC (principal + interest). Approving...`,
+      "info"
+    );
+
+    // Approve exact debt amount from user wallet to LendingPool
     const approveTx = await contracts.sepolia.mockUSDC.approve(
-      ADDRESSES.sepolia.lendingPool,  // pool pulls tokens from user
+      ADDRESSES.sepolia.lendingPool,
       totalDebt
     );
     await approveTx.wait();
 
-    // Get LZ fee for unlock message
+    // Get LZ fee for unlock message — use principal for unlock amount
     const lzFee = await contracts.sepolia.bridge.quote(
       MSG_REPAY_UNLOCK,
       userAddress,
-      amountBN
+      principal
     );
     const feeWithBuffer = (lzFee * 120n) / 100n;
 
     // Repay + send LayerZero unlock message to Amoy
     setStatus("Step 2/3 — Repaying loan + sending unlock message via LayerZero...", "info");
-    const repayTx = await contracts.sepolia.bridge.repayAndUnlock(amountBN, {
+    const repayTx = await contracts.sepolia.bridge.repayAndUnlock(principal, {
       value: feeWithBuffer,
     });
     await repayTx.wait();
