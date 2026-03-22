@@ -91,7 +91,7 @@ contract AmoyLendingPool is Ownable, ReentrancyGuard {
         DepositInfo storage dep = deposits[msg.sender];
         uint256 available = dep.amount;
         require(available >= amount, "Insufficient unlocked balance");
-        require(locked[msg.sender] == 0, "Collateral is locked — repay loan first");
+        require(locked[msg.sender] == 0, "Collateral is locked - repay loan first");
 
         uint256 interest = dep.interestSnapshot;
 
