@@ -7,17 +7,17 @@ import { OptionsBuilder } from "@layerzerolabs/oapp-evm/contracts/oapp/libs/Opti
 import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 
 interface ISepoliaLendingPool {
-    function repay(address user, uint256 amount) external; // pass user explicitly
-    function getDebt(address user) external view returns (uint256);
-    function loans(address user) external view returns (uint256 principal, uint256 interestSnapshot, uint256 lastSnapshotTime);
+    function repay(address user) external;
+    function loans(address user) external view returns (uint256 principal, bool active);
+    function getRepayAmount(address user) external view returns (uint256);
 }
 
 /**
  * @title SepoliaChainLendBridge
  * @notice Sends ONE-WAY LayerZero messages from Sepolia → Amoy.
  * @dev MSG_BORROW_REQUEST: signals Amoy to lock user collateral.
- *      MSG_REPAY_UNLOCK: signals Amoy to unlock user collateral after repay.
- *      No messages are received (Amoy never sends back in simplified arch).
+ *      MSG_REPAY_UNLOCK:   signals Amoy to unlock user collateral after repay.
+ *      No messages are received (Amoy never sends back — one-way arch).
  */
 contract ChainLendBridge is OApp {
     using OptionsBuilder for bytes;
@@ -28,12 +28,12 @@ contract ChainLendBridge is OApp {
 
     // ─── State ───────────────────────────────────────────────────────
     ISepoliaLendingPool public lendingPool;
-    uint32 public amoyEid;               // Amoy endpoint ID = 40267
-    uint128 public lzGasLimit = 300_000; // gas for Amoy _lzReceive
+    uint32  public amoyEid;               // Amoy endpoint ID = 40267
+    uint128 public lzGasLimit = 300_000;  // gas for Amoy _lzReceive
 
     // ─── Events ──────────────────────────────────────────────────────
     event BorrowRequested(address indexed user, uint256 amount, bytes32 guid);
-    event RepayUnlockSent(address indexed user, uint256 amount, bytes32 guid);
+    event RepayUnlockSent(address indexed user, uint256 principal, bytes32 guid);
     event LendingPoolSet(address indexed pool);
     event AmoyEidSet(uint32 eid);
 
@@ -63,10 +63,11 @@ contract ChainLendBridge is OApp {
     // ─── Quote Fee ───────────────────────────────────────────────────
     /**
      * @notice Get the LayerZero fee for sending a message to Amoy.
-     * @dev Frontend calls this FIRST before calling borrow() or repayAndUnlock().
+     * @dev Frontend calls this BEFORE borrow() or repayAndUnlock().
+     *      Always add 20% buffer to returned value: fee * 120 / 100.
      */
     function quote(
-        uint8 msgType,
+        uint8   msgType,
         address user,
         uint256 amount
     ) external view returns (uint256 nativeFee) {
@@ -81,11 +82,13 @@ contract ChainLendBridge is OApp {
 
     // ─── Borrow: Send MSG_BORROW_REQUEST to Amoy ─────────────────────
     /**
-     * @notice Sends a borrow request to Amoy via LayerZero.
-     * @dev msg.value must equal quote(MSG_BORROW_REQUEST, user, amount).
+     * @notice Sends borrow request to Amoy via LayerZero.
+     * @dev msg.value must be >= quote(1, user, amount) + 20% buffer.
+     *      Amoy will lock amount*2 as collateral (50% LTV).
      *      After sending, frontend polls Amoy locked[user] every 10 seconds.
      *      When lock detected, frontend calls SepoliaLendingPool.adminReleaseLoan().
-     * @param amount Amount of collateral to lock on Amoy (in mUSDC, 6 decimals).
+     * @param amount Amount to borrow in sUSDC (6 decimals).
+     *               Amoy will lock amount*2 mUSDC as collateral.
      */
     function requestBorrow(uint256 amount) external payable returns (bytes32 guid) {
         require(amoyEid != 0, "Amoy EID not set");
@@ -103,32 +106,41 @@ contract ChainLendBridge is OApp {
             payload,
             options,
             MessagingFee(msg.value, 0),
-            payable(msg.sender)    // refund excess fee to user
+            payable(msg.sender) // refund excess fee to user
         );
 
         emit BorrowRequested(msg.sender, amount, receipt.guid);
         return receipt.guid;
     }
 
-    // ─── Repay: Collect tokens + Send MSG_REPAY_UNLOCK to Amoy ──────
+    // ─── Repay: Collect tokens + Send MSG_REPAY_UNLOCK to Amoy ───────
     /**
      * @notice User repays loan on Sepolia, triggers Amoy collateral unlock.
-     * @dev msg.value must equal quote(MSG_REPAY_UNLOCK, user, amount).
-     *      LendingPool.repay() handles token collection.
-     *      This function sends the LZ unlock signal to Amoy.
-     * @param amount The principal amount to unlock on Amoy.
+     * @dev msg.value must be >= quote(3, user, principal) + 20% buffer.
+     *      Reads principal from LendingPool internally — user passes no amount.
+     *      LendingPool.repay(user) pulls principal + 10 sUSDC flat fee from user.
+     *      User must approve SepoliaLendingPool for (principal + 10e6) before calling.
+     *      CRITICAL: msg.value forwarded explicitly to _lzSend.
+     *                If omitted, bridge gets 0 ETH → NotEnoughNative error.
      */
-    function repayAndUnlock(uint256 amount) external payable {
+    function repayAndUnlock() external payable {
         require(amoyEid != 0, "Amoy EID not set");
         require(address(lendingPool) != address(0), "LendingPool not set");
-        require(amount > 0, "Zero amount");
         require(msg.value > 0, "Must pay LayerZero fee");
 
-        // Step 1: Collect repayment on Sepolia (pass msg.sender — bridge is caller, not user)
-        lendingPool.repay(msg.sender, amount);
+        // Read principal from pool — no user input needed
+        (uint256 principal, bool active) = lendingPool.loans(msg.sender);
+        require(active, "No active loan");
+        require(principal > 0, "Zero principal");
+
+        // Step 1: Collect repayment on Sepolia
+        // Bridge passes msg.sender as user — pool sees bridge as caller
+        // so user address must be passed explicitly (not msg.sender inside pool)
+        lendingPool.repay(msg.sender);
 
         // Step 2: Send unlock signal to Amoy via LayerZero
-        bytes memory payload = abi.encode(MSG_REPAY_UNLOCK, msg.sender, amount);
+        // Pass principal so Amoy knows how much to unlock (amount*2)
+        bytes memory payload = abi.encode(MSG_REPAY_UNLOCK, msg.sender, principal);
         bytes memory options = OptionsBuilder
             .newOptions()
             .addExecutorLzReceiveOption(lzGasLimit, 0);
@@ -137,24 +149,24 @@ contract ChainLendBridge is OApp {
             amoyEid,
             payload,
             options,
-            MessagingFee(msg.value, 0),
+            MessagingFee(msg.value, 0), // msg.value forwarded explicitly
             payable(msg.sender)
         );
 
-        emit RepayUnlockSent(msg.sender, amount, receipt.guid);
+        emit RepayUnlockSent(msg.sender, principal, receipt.guid);
     }
 
-    // ─── Receive (not used in one-way arch — but required by OApp) ───
+    // ─── Receive (not used — required by OApp interface) ─────────────
     /**
-     * @dev Amoy never sends messages back in simplified architecture.
-     *      This is a safety stub — reverts if somehow called.
+     * @dev Amoy never sends messages back in one-way architecture.
+     *      Safety revert if somehow called.
      */
     function _lzReceive(
-        Origin calldata /*_origin*/,
-        bytes32 /*_guid*/,
-        bytes calldata /*_message*/,
-        address /*_executor*/,
-        bytes calldata /*_extraData*/
+        Origin calldata,
+        bytes32,
+        bytes calldata,
+        address,
+        bytes calldata
     ) internal pure override {
         revert("Sepolia bridge does not receive messages");
     }

@@ -1,9 +1,9 @@
-# ChainLend — Simplified Architecture Document
+# ChainLend — Architecture Document
 ## One-Way LayerZero Messaging Pattern
 
 ---
 
-## 1. What Is ChainLend (Simple Version)
+## 1. What Is ChainLend
 
 ChainLend lets a user do this:
 
@@ -17,8 +17,8 @@ The user **locks** their tokens on Amoy as collateral.
 In exchange, they **receive** tokens on Sepolia as a loan.
 When they **repay** on Sepolia, their Amoy collateral is **unlocked**.
 
-The cross-chain communication (telling Amoy to lock/unlock)
-is done via **LayerZero V2 real messages**.
+Cross-chain communication (telling Amoy to lock/unlock)
+is done via **LayerZero V2 real messages**. Tokens never cross chains — only messages do.
 
 ---
 
@@ -39,8 +39,8 @@ is done via **LayerZero V2 real messages**.
 │  index.html   app.js   web3.js (ethers v6)       │
 │                                                  │
 │  Role: Coordinator — talks to both chains        │
-│        Polls Amoy to detect LZ delivery          │
-│        Calls adminRelease after confirmation     │
+│        Polls Amoy every 10s to detect LZ delivery│
+│        Calls adminReleaseLoan after confirmation │
 └──────────────┬──────────────────────┬────────────┘
                │                      │
                ▼                      ▼
@@ -48,7 +48,7 @@ is done via **LayerZero V2 real messages**.
 │   POLYGON AMOY       │  │   ETHEREUM SEPOLIA        │
 │  (Collateral Chain)  │  │   (Loan Chain)            │
 │                      │  │                           │
-│  MockUSDC (mUSDC)   │  │  MockUSDC (sUSDC)         │
+│  MockUSDC (mUSDC)    │  │  MockUSDC (sUSDC)         │
 │  LendingPool         │  │  LendingPool              │
 │  ChainLendBridge     │  │  ChainLendBridge          │
 │                      │  │                           │
@@ -63,50 +63,48 @@ is done via **LayerZero V2 real messages**.
 
 ---
 
-## 3. Contract Roles (What Each Contract Does)
+## 3. Contract Roles
 
 ```
 POLYGON AMOY
 ─────────────────────────────────────────────────────
 MockUSDC (mUSDC)
-  → The token user deposits as collateral
+  → Token user deposits as collateral
   → Standard ERC-20, 6 decimals
-  → Address: 0x255447fD05AE643662a351e8b33730297283C4be
 
 LendingPool (Amoy)
   → Holds user deposits
-  → Locks collateral when borrow is confirmed
-  → Unlocks collateral when repay is confirmed
-  → Tracks: balances[user], locked[user]
-  → Address: 0x4851d5211dfe3fa12E1eAA3e97aFAA55889de9AA
+  → Locks collateral when borrow request arrives via LZ
+  → Unlocks collateral when repay message arrives via LZ
+  → Tracks: deposits[user].amount, locked[user]
+  → onlyBridge modifier on lock() and unlock()
 
 ChainLendBridge (Amoy)
   → Receives LayerZero messages FROM Sepolia
   → Decodes message type (BORROW or REPAY)
   → Calls LendingPool.lock() or LendingPool.unlock()
-  → Does NOT send any message back (no ABA)
-  → Address: 0xaAFE5a3d4bD40092A637c60A6f331FF7e20a9d78
+  → Uses try/catch — _lzReceive must NEVER revert
+  → Does NOT send any message back (one-way only)
 
 
 ETHEREUM SEPOLIA
 ─────────────────────────────────────────────────────
 MockUSDC (sUSDC)
-  → The token user receives as loan
+  → Token user receives as loan
   → Standard ERC-20, 6 decimals
-  → Address: 0xef2B880E4653381A613Abd215aE5f13ce6d5Ef9d
+  → Pool pre-funded with 500,000 sUSDC
 
 LendingPool (Sepolia)
-  → Holds loan liquidity (pre-funded with 500k sUSDC)
-  → Tracks user loan amounts and interest
-  → adminReleaseLoan() — releases sUSDC to user
-  → repay() — collects sUSDC back from user
-  → Address: 0x125A5348bE74073b03970dB888549258d6d5db99
+  → Holds loan liquidity
+  → Tracks user loan principal
+  → adminReleaseLoan(user, amount) — onlyOwner, releases sUSDC to user
+  → repay(user) — called by bridge, collects principal + 10 sUSDC flat fee
 
 ChainLendBridge (Sepolia)
   → Sends LayerZero messages TO Amoy
-  → MSG_BORROW_REQUEST (type 1) — triggered by borrow
-  → MSG_REPAY_UNLOCK (type 3)  — triggered by repay
-  → Address: 0x3C972A74Fc0dAD0Fa32CeD08C8334B521E44aC83
+  → requestBorrow(amount) — triggers MSG_BORROW_REQUEST
+  → repayAndUnlock()      — triggers MSG_REPAY_UNLOCK
+  → quote(msgType, user, amount) — fee estimation for frontend
 ```
 
 ---
@@ -123,7 +121,8 @@ Payload:  abi.encode(uint8(1), userAddress, amount)
 Meaning:  "User wants to borrow. Lock their collateral."
 From:     Sepolia Bridge
 To:       Amoy Bridge
-Effect:   Amoy LendingPool.lock(user, amount)
+Effect:   AmoyLendingPool.lock(user, amount * 2)
+          (2x because 50% LTV — borrow 500, lock 1000)
 
 Message Type 3: MSG_REPAY_UNLOCK
 ─────────────────────────────────
@@ -131,7 +130,7 @@ Payload:  abi.encode(uint8(3), userAddress, amount)
 Meaning:  "User repaid. Unlock their collateral."
 From:     Sepolia Bridge
 To:       Amoy Bridge
-Effect:   Amoy LendingPool.unlock(user, amount)
+Effect:   AmoyLendingPool.unlock(user, amount * 2)
 ```
 
 ---
@@ -153,7 +152,7 @@ MockUSDC.approve(LendingPool, amount)
 LendingPool.deposit(amount)
  │
  │  mUSDC moves: User Wallet → LendingPool
- │  balances[user] += amount
+ │  deposits[user].amount += amount
  ▼
 ✅ Deposit complete. Funds sitting in Amoy LendingPool.
 
@@ -161,16 +160,16 @@ LendingPool.deposit(amount)
 PHASE 2: BORROW (starts on Sepolia, confirms on Amoy)
 ══════════════════════════════════════════════════════
 
-User (on Sepolia frontend)
+User (switches to Sepolia)
  │
  │  3. Click "Borrow" — enters amount (max 50% of deposit)
  ▼
-Frontend calls: SepoliaBridge.quote(amount)
- │             → gets LayerZero fee in ETH
+Frontend calls: SepoliaBridge.quote(MSG_BORROW_REQUEST, user, amount)
+              → gets LayerZero fee in ETH
  │
- │  4. Frontend sends borrow request
+ │  4. Frontend sends borrow request WITH lz fee as msg.value
  ▼
-SepoliaBridge.borrow(amount, { value: lzFee })
+SepoliaBridge.requestBorrow(amount, { value: lzFee })
  │
  │  Encodes: abi.encode(1, userAddress, amount)
  │  Calls:   _lzSend(amoyEid, payload, options, fee)
@@ -183,44 +182,46 @@ SepoliaBridge.borrow(amount, { value: lzFee })
                                                     │
                                         Decodes msgType = 1
                                                     │
-                                        LendingPool.lock(user, amount)
+                                        try LendingPool.lock(user, amount * 2)
                                                     │
-                                        locked[user] += amount
-                                        balances[user] -= amount
+                                        locked[user] += amount * 2
+                                        deposits[user].amount -= amount * 2
                                                     │
                                                     ▼
                                         ✅ Collateral LOCKED on Amoy
 
 Meanwhile on Frontend:
  │
- │  5. Frontend polls Amoy LendingPool every 3 seconds
- │     "Is locked[user] >= amount yet?"
+ │  5. Frontend polls Amoy LendingPool.locked(user) every 10 seconds
+ │     (10s interval avoids RPC 429 rate limiting on free tier)
+ │     Max wait: 5 minutes
  │
- │     Attempt 1: locked = 0 ... wait
- │     Attempt 2: locked = 0 ... wait
- │     Attempt N: locked = amount ← LayerZero delivered!
+ │     Attempt 1: locked = 0 ... wait 10s
+ │     Attempt 2: locked = 0 ... wait 10s
+ │     Attempt N: locked = amount*2 ← LayerZero delivered!
  ▼
 Frontend detects lock confirmed
  │
- │  6. Frontend calls adminReleaseLoan (owner wallet)
+ │  6. Owner wallet calls adminReleaseLoan (onlyOwner)
  ▼
 SepoliaLendingPool.adminReleaseLoan(user, amount)
  │
  │  sUSDC moves: LendingPool → User Wallet
- │  loans[user] = amount
+ │  loans[user].principal = amount
+ │  loans[user].active = true
  ▼
 ✅ User receives sUSDC on Sepolia
 
 
 WHAT USER SEES ON SCREEN:
 ─────────────────────────
-[Deposit mUSDC]  → MetaMask popup → ✅ Deposited
-[Borrow sUSDC]   → MetaMask popup (LZ fee)
+[Approve mUSDC]  → MetaMask popup 1 → ✅ Approved
+[Deposit mUSDC]  → MetaMask popup 2 → ✅ Deposited
+[Borrow sUSDC]   → MetaMask popup 3 (LZ fee in ETH)
                  → "📡 Cross-chain message sent..."
                  → "⏳ Waiting for Amoy confirmation..."
                  → (1-3 mins real wait)
                  → "✅ Collateral locked on Amoy!"
-                 → MetaMask popup (adminRelease)
                  → "🎉 sUSDC received in your wallet!"
 ```
 
@@ -235,17 +236,20 @@ PHASE 3: REPAY (starts on Sepolia)
 User (on Sepolia, has sUSDC to repay)
  │
  │  1. Approve sUSDC spend
+ │     repayAmount = principal + 10 sUSDC (flat fee)
  ▼
 MockUSDC.approve(SepoliaLendingPool, repayAmount)
  │
  │  2. Click "Repay"
  ▼
-SepoliaBridge.repay(amount, { value: lzFee })
+SepoliaBridge.repayAndUnlock({ value: lzFee })
  │
- │  sUSDC moves: User Wallet → LendingPool
- │  loans[user] = 0
+ │  Bridge reads principal from LendingPool
+ │  Calls LendingPool.repay(user)
+ │     → pulls principal + 10 sUSDC flat fee from user
+ │     → clears loans[user]
  │
- │  Encodes: abi.encode(3, userAddress, amount)
+ │  Encodes: abi.encode(3, userAddress, principal)
  │  Calls:   _lzSend(amoyEid, payload, options, fee)
  ▼
 ── LayerZero Network ──────────────────────────────→
@@ -256,14 +260,14 @@ SepoliaBridge.repay(amount, { value: lzFee })
                                                     │
                                         Decodes msgType = 3
                                                     │
-                                        LendingPool.unlock(user, amount)
+                                        try LendingPool.unlock(user, amount * 2)
                                                     │
-                                        locked[user] -= amount
-                                        balances[user] += amount
+                                        locked[user] -= amount * 2
+                                        deposits[user].amount += amount * 2
                                                     ▼
                                         ✅ Collateral UNLOCKED on Amoy
 
-Frontend polls Amoy until unlock detected
+Frontend polls Amoy until locked[user] == 0
  ▼
 ✅ "Collateral unlocked! You can now withdraw on Amoy."
 
@@ -278,14 +282,14 @@ User (switches to Amoy)
 AmoyLendingPool.withdraw(amount)
  │
  │  mUSDC moves: LendingPool → User Wallet
- │  balances[user] -= amount
+ │  deposits[user].amount -= amount
  ▼
 ✅ Original mUSDC back in wallet. Flow complete.
 ```
 
 ---
 
-## 7. Frontend Polling Logic (How it Detects LZ Delivery)
+## 7. Frontend Polling Logic
 
 ```
 PROBLEM:
@@ -295,33 +299,39 @@ Frontend needs to know WHEN Amoy received it.
 
 SOLUTION: Poll Amoy Contract State
 
-function waitUntilLocked(user, expectedAmount):
+function pollUntilLocked(user, expectedAmount):
 │
 ├── Start timer (max 5 minutes)
 │
-└── Loop every 3 seconds:
+└── Loop every 10 seconds:
     │
     ├── Read AmoyLendingPool.locked(user)
     │
     ├── If locked >= expectedAmount:
     │       → LayerZero delivered ✅
-    │       → Break loop
+    │       → Break loop, call adminReleaseLoan
     │
     ├── If timer > 5 minutes:
     │       → Show error: "Check LayerZero Scan"
     │       → Break loop
     │
-    └── Else: wait 3 seconds, try again
+    └── Else: wait 10 seconds, try again
 
+WHY 10 SECONDS NOT LESS:
+─────────────────────────────────────────────
+Free tier RPC providers (publicnode, polygon rpc)
+rate limit aggressively at ~10 req/minute per IP.
+3 second polling = instant 429 errors during demo.
+10 second polling = stable, never rate limited.
 
 WHY THIS WORKS:
 ─────────────────────────────────────────────
-AmoyBridge._lzReceive() is called by LayerZero
-It calls LendingPool.lock(user, amount)
-locked[user] value changes on-chain
-Frontend reads this public variable
-When it changes → we know LZ delivered
-No webhook. No backend. Pure on-chain state.
+AmoyBridge._lzReceive() is called by LayerZero executor.
+It calls LendingPool.lock(user, amount).
+locked[user] value changes on-chain.
+Frontend reads this public mapping.
+When it changes → LZ delivered.
+No webhook. No backend. Pure on-chain state polling.
 ```
 
 ---
@@ -331,19 +341,20 @@ No webhook. No backend. Pure on-chain state.
 ```
 REAL (genuine cross-chain):
 ────────────────────────────────────────────────────
-✅ LayerZero V2 messages sent from Sepolia → Amoy
-✅ Real message hash visible on layerzeroscan.com
-✅ Real _lzReceive execution on Amoy
-✅ Real collateral locking on Amoy chain
+✅ LayerZero V2 OApp messages sent Sepolia → Amoy
+✅ Real message hash visible on testnet.layerzeroscan.com
+✅ Real _lzReceive execution on Amoy by LZ executor
+✅ Real collateral locking/unlocking on Amoy chain
 ✅ Real token movement on both chains
 ✅ Real MetaMask transactions on both chains
-✅ Real LZ fees paid in ETH
+✅ Real LZ fees paid in ETH (Sepolia side)
 
-SIMPLIFIED (vs original design):
+SIMPLIFIED (vs theoretical full design):
 ────────────────────────────────────────────────────
 ❌ Removed: ABA return message (Amoy → Sepolia)
 ❌ Removed: Auto-release on Sepolia via LZ message
-✅ Replaced with: Frontend polls + adminRelease
+✅ Replaced with: Frontend polling + adminReleaseLoan (onlyOwner)
+✅ Replaced: Time-based 8% APR with flat 10 sUSDC repayment fee
 
 WHY THIS IS STILL VALID:
 ────────────────────────────────────────────────────
@@ -351,129 +362,105 @@ The CORE concept — using LayerZero to coordinate
 cross-chain collateral — is fully demonstrated.
 
 The ABA return leg is an optimization, not the concept.
-Many production protocols use off-chain relayers
-(like Chainlink Automation, Gelato) instead of ABA.
-
+Many production protocols use off-chain coordination
+(Chainlink Automation, Gelato) instead of ABA messages.
 Our frontend acting as coordinator = same pattern.
+
+Flat fee replaces APR for demo clarity.
+In production: time-based variable rate replaces flat fee.
 ```
 
 ---
 
-## 9. Deployed Contract Addresses
+## 9. Protocol Parameters
 
 ```
-POLYGON AMOY (EID: 40267)
-──────────────────────────────────────────────────
-MockUSDC:      0x255447fD05AE643662a351e8b33730297283C4be
-LendingPool:   0x4851d5211dfe3fa12E1eAA3e97aFAA55889de9AA
-Bridge:        0xaAFE5a3d4bD40092A637c60A6f331FF7e20a9d78
+LTV (Loan to Value):     50%
+  → Deposit 1000 mUSDC → Borrow max 500 sUSDC
+  → 2x collateral always locked vs loan amount
 
-ETHEREUM SEPOLIA (EID: 40161)
+Deposit APY:             5% per year
+  → Earned on Amoy collateral while deposited
+
+Borrow Fee:              Flat 10 sUSDC per loan
+  → Fixed fee, no time-based calculation
+  → Borrow 500 sUSDC → repay 510 sUSDC
+
+LayerZero Gas:           300,000 units
+  → Executor gas limit for _lzReceive on destination
+
+Polling Interval:        10 seconds
+Polling Timeout:         5 minutes
+
+Example:
+  Deposit  1000 mUSDC on Amoy → locked as collateral
+  Borrow    500 sUSDC on Sepolia
+  Repay     510 sUSDC on Sepolia (500 principal + 10 flat fee)
+  Unlock   1000 mUSDC on Amoy → available to withdraw
+```
+
+---
+
+## 10. Security Design
+
+```
+onlyBridge modifier
+  → Only ChainLendBridge can call lock() and unlock()
+  → Prevents anyone from locking/unlocking directly
+
+try/catch in _lzReceive
+  → If lock() or unlock() fails, _lzReceive does NOT revert
+  → A revert in _lzReceive permanently blocks the LZ channel
+  → Failure is logged as an event, channel stays open
+
+adminReleaseLoan is onlyOwner
+  → Intentional — prevents unauthorized loan releases
+  → Owner calls this only after polling confirms lock
+  → In production: replaced with on-chain LZ confirmation
+
+One loan per user
+  → require(!loans[user].active) on borrow
+  → Prevents overlapping cross-chain state
+  → Simplifies collateral tracking significantly
+
+msg.value forwarding
+  → bridge.repayAndUnlock{value: msg.value}()
+  → ETH explicitly forwarded or bridge gets 0 → NotEnoughNative error
+
+Emergency unlock (future)
+  → 30 minute timeout if LZ message never arrives
+  → Protects user from permanently locked collateral
+```
+
+---
+
+## 11. Deployed Contract Addresses
+
+> Addresses will be updated after each redeployment.
+> Always use addresses from constants.js as the source of truth.
+
+```
+POLYGON AMOY (Chain ID: 80002 | EID: 40267)
 ──────────────────────────────────────────────────
-MockUSDC:      0xef2B880E4653381A613Abd215aE5f13ce6d5Ef9d
-LendingPool:   0x125A5348bE74073b03970dB888549258d6d5db99
-Bridge:        0x3C972A74Fc0dAD0Fa32CeD08C8334B521E44aC83
+MockUSDC:      TBD
+LendingPool:   TBD
+Bridge:        TBD
+
+ETHEREUM SEPOLIA (Chain ID: 11155111 | EID: 40161)
+──────────────────────────────────────────────────
+MockUSDC:      TBD
+LendingPool:   TBD
+Bridge:        TBD
 
 SHARED
 ──────────────────────────────────────────────────
 LayerZero Endpoint: 0x6EDCE65403992e310A62460808c4b910D972f10f
 Deployer/Owner:     0x003b739410f14b248A2A24cd4FC4021F40Fc2B20
-```
-
----
-
-## 10. Protocol Parameters
-
-```
-LTV (Loan to Value):     50%
-  → Deposit 1000 mUSDC → Borrow max 500 sUSDC
-
-Deposit APY:             5% per year
-  → Earned on Amoy collateral
-
-Borrow APR:              8% per year
-  → Accrues on Sepolia loan
-
-Example:
-  Deposit  1000 mUSDC on Amoy
-  Borrow    500 sUSDC on Sepolia
-  After 1 year:
-    Amoy collateral earns:  50 mUSDC interest
-    Sepolia debt grows to:  540 sUSDC owed
-```
-
----
-
-## 11. What Needs to Change in Contracts
-
-```
-CHANGE 1: Amoy Bridge _lzReceive
-──────────────────────────────────────────────────
-REMOVE this block (the ABA return send):
-
-  // DELETE THIS ENTIRE SECTION
-  bytes memory returnPayload = abi.encode(MSG_LOCK_CONFIRMED, user, amount);
-  bytes memory options = OptionsBuilder.newOptions()
-      .addExecutorLzReceiveOption(300_000, 0);
-  _lzSend(srcEid, returnPayload, options, MessagingFee(msg.value, 0), payable(this));
-
-KEEP this (the actual lock):
-  lendingPool.lock(user, amount);   // ✅ KEEP
-
-
-CHANGE 2: Sepolia LendingPool
-──────────────────────────────────────────────────
-ADD this new function:
-
-  function adminReleaseLoan(
-      address user,
-      uint256 amount
-  ) external onlyOwner {
-      require(loans[user] == 0, "Loan already active");
-      token.transfer(user, amount);
-      loans[user] = amount;
-      emit LoanReleased(user, amount);
-  }
-
-
-NOTHING ELSE CHANGES.
-All wiring, peers, endpoints stay the same.
-Only 2 small edits total.
-```
-
----
-
-## 12. Next Steps
-
-```
-Step 1: Edit Amoy Bridge
-  → Remove _lzSend block from _lzReceive
-  → Redeploy on Amoy
-  → Set peer again (setPeer)
-
-Step 2: Edit Sepolia LendingPool
-  → Add adminReleaseLoan function
-  → Redeploy on Sepolia
-  → Set bridge again (setBridge)
-
-Step 3: Update Frontend
-  → Add polling logic (waitUntilLocked)
-  → Add adminRelease call after lock detected
-  → Add status messages for user
-
-Step 4: End-to-End Test
-  → Mint mUSDC on Amoy
-  → Deposit → Borrow flow
-  → Check layerzeroscan.com for proof
-  → Repay → Withdraw flow
-
-Step 5: Deploy Frontend to Vercel
-  → Push to GitHub
-  → Connect to Vercel
-  → Done
+Amoy  EID:          40267
+Sepolia EID:        40161
 ```
 
 ---
 
 *ChainLend — Cross-Chain DeFi Lending using LayerZero V2 OApp*
-*Polygon Amoy (Collateral) ↔ Ethereum Sepolia (Loans)*
+*Polygon Amoy (Collateral) → Ethereum Sepolia (Loans)*

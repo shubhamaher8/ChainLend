@@ -12,33 +12,35 @@
 5. [Wire Amoy Contracts](#5-wire-amoy-contracts)
 6. [Wire Sepolia Contracts](#6-wire-sepolia-contracts)
 7. [Fund the Pools](#7-fund-the-pools)
-8. [Set Enforced Options (Critical)](#8-set-enforced-options-critical)
-9. [E2E Test — Full Borrow/Repay Flow](#9-e2e-test--full-borrowrepay-flow)
-10. [Verify Everything on Explorers](#10-verify-everything-on-explorers)
-11. [Deployed Addresses Log](#11-deployed-addresses-log)
-12. [Troubleshooting](#12-troubleshooting)
+8. [Set Enforced Options](#8-set-enforced-options)
+9. [Update Frontend constants.js](#9-update-frontend-constantsjs)
+10. [E2E Test — Full Borrow/Repay Flow](#10-e2e-test--full-borrowrepay-flow)
+11. [Verify on Explorers](#11-verify-on-explorers)
+12. [Deployed Addresses Log](#12-deployed-addresses-log)
+13. [Troubleshooting](#13-troubleshooting)
 
 ---
 
-## Reference Constants (keep this open)
+## Reference Constants (keep this open the whole time)
 
 ```
-LayerZero Endpoint (SAME on both chains):
+LayerZero Endpoint (SAME address on both chains):
   0x6EDCE65403992e310A62460808c4b910D972f10f
 
-Amoy  EID : 40267
-Sepolia EID: 40161
+Amoy   EID : 40267
+Sepolia EID : 40161
 
-Your deployer wallet (owner + delegate):
+Deployer/Owner wallet:
   0x003b739410f14b248A2A24cd4FC4021F40Fc2B20
 
-Amoy  RPC : https://rpc-amoy.polygon.technology
-Sepolia RPC: https://rpc.sepolia.org (or Infura/Alchemy)
+Amoy   RPC : https://rpc-amoy.polygon.technology
+Sepolia RPC : https://ethereum-sepolia-rpc.publicnode.com
+              ↑ use this one — rpc.sepolia.org is unreliable
 
-Amoy  Explorer : https://amoy.polygonscan.com
-Sepolia Explorer: https://sepolia.etherscan.io
+Amoy   Explorer : https://amoy.polygonscan.com
+Sepolia Explorer : https://sepolia.etherscan.io
 
-LayerZero Scan: https://testnet.layerzeroscan.com
+LayerZero Scan : https://testnet.layerzeroscan.com
 ```
 
 ---
@@ -57,13 +59,18 @@ Before touching Remix, confirm all of these:
   - Explorer: `https://amoy.polygonscan.com`
 - [ ] **Ethereum Sepolia** added to MetaMask
   - Network Name: Sepolia
-  - RPC: `https://rpc.sepolia.org`
+  - RPC: `https://ethereum-sepolia-rpc.publicnode.com`
   - Chain ID: `11155111`
   - Symbol: `ETH`
   - Explorer: `https://sepolia.etherscan.io`
-- [ ] Wallet has **at least 1 MATIC** on Amoy (get from https://faucet.polygon.technology)
-- [ ] Wallet has **at least 0.1 ETH** on Sepolia (get from https://sepoliafaucet.com)
-- [ ] All 3 `.sol` files ready: `MockUSDC.sol`, `LendingPool.sol`, `ChainLendBridge.sol`
+- [ ] Wallet has **at least 1 MATIC** on Amoy (faucet: https://faucet.polygon.technology)
+- [ ] Wallet has **at least 0.1 ETH** on Sepolia (faucet: https://sepoliafaucet.com)
+- [ ] All 5 `.sol` files ready:
+  - `MockUSDC.sol`
+  - `AmoyLendingPool.sol`
+  - `AmoyBridge.sol`
+  - `SepoliaLendingPool.sol`
+  - `SepoliaBridge.sol`
 
 ---
 
@@ -73,42 +80,43 @@ Before touching Remix, confirm all of these:
 Go to https://remix.ethereum.org
 
 ### 2.2 Create file structure
-In the `contracts/` folder, create these 3 files and paste the code:
+In the `contracts/` folder, create 5 files:
 ```
 contracts/
   MockUSDC.sol
-  LendingPool.sol
-  ChainLendBridge.sol
+  AmoyLendingPool.sol
+  AmoyBridge.sol
+  SepoliaLendingPool.sol
+  SepoliaBridge.sol
 ```
 
 ### 2.3 Configure Compiler
 - Click the **Solidity Compiler** tab (second icon in left sidebar)
-- Compiler version: `0.8.19` (or `^0.8.19` auto-selects it)
+- Compiler version: `0.8.19`
 - EVM Version: `paris`
 - Enable optimization: **YES**, runs: `200`
-- Click **Compile MockUSDC.sol** → should show green checkmark
-- Repeat for **LendingPool.sol** and **ChainLendBridge.sol**
+- Compile each file — should show green checkmarks
 
-> If you see import errors for `@layerzerolabs` or `@openzeppelin`, Remix auto-resolves
-> npm packages from unpkg. Just wait 5–10 seconds and retry compile.
+> If you see import errors for `@layerzerolabs` or `@openzeppelin`,
+> Remix auto-resolves npm packages from unpkg. Wait 10 seconds and retry.
 
 ### 2.4 Connect MetaMask
 - Click the **Deploy & Run** tab (third icon)
 - Environment: `Injected Provider - MetaMask`
 - MetaMask will prompt to connect — approve
-- Confirm "Account" shows your deployer wallet address
+- Confirm the "Account" field shows your deployer wallet
 
 ---
 
 ## 3. Deploy on Polygon Amoy
 
 > Switch MetaMask to **Polygon Amoy** before this section.
-> Confirm the network badge in Remix shows "Custom (80002) network".
+> Remix network badge should show "Custom (80002) network".
 
 ### 3.1 Deploy MockUSDC (mUSDC) on Amoy
 
 - Contract: `MockUSDC`
-- In the **Deploy** section, expand the constructor inputs:
+- Constructor inputs:
   ```
   _name:          Mock USDC
   _symbol:        mUSDC
@@ -119,19 +127,20 @@ contracts/
 
 > This mints 1,000,000 mUSDC (6 decimals) to your deployer wallet.
 
-### 3.2 Deploy LendingPool on Amoy
+### 3.2 Deploy AmoyLendingPool
 
-- Contract: `LendingPool`
-- Constructor input:
+- Contract: `AmoyLendingPool`
+- Constructor inputs:
   ```
-  _token: <AMOY_MUSDC address>
+  _token:    <AMOY_MUSDC>
+  _delegate: 0x003b739410f14b248A2A24cd4FC4021F40Fc2B20
   ```
 - Click **Deploy** → approve MetaMask tx
 - ✅ Save address as `AMOY_POOL`
 
-### 3.3 Deploy ChainLendBridge on Amoy
+### 3.3 Deploy AmoyBridge
 
-- Contract: `ChainLendBridge`
+- Contract: `AmoyBridge` (ChainLendBridge)
 - Constructor inputs:
   ```
   _endpoint: 0x6EDCE65403992e310A62460808c4b910D972f10f
@@ -145,7 +154,7 @@ contracts/
 ## 4. Deploy on Ethereum Sepolia
 
 > Switch MetaMask to **Ethereum Sepolia** before this section.
-> Confirm the network badge in Remix shows "Custom (11155111) network".
+> Remix network badge should show "Custom (11155111) network".
 
 ### 4.1 Deploy MockUSDC (sUSDC) on Sepolia
 
@@ -159,21 +168,22 @@ contracts/
 - Click **Deploy** → approve MetaMask tx
 - ✅ Save address as `SEPOLIA_SUSDC`
 
-> Initial supply is 0. We mint to the pool in Step 7.
+> Initial supply is 0 — we mint directly to the pool in Step 7.
 
-### 4.2 Deploy LendingPool on Sepolia
+### 4.2 Deploy SepoliaLendingPool
 
-- Contract: `LendingPool`
-- Constructor input:
+- Contract: `SepoliaLendingPool`
+- Constructor inputs:
   ```
-  _token: <SEPOLIA_SUSDC address>
+  _token:    <SEPOLIA_SUSDC>
+  _delegate: 0x003b739410f14b248A2A24cd4FC4021F40Fc2B20
   ```
 - Click **Deploy** → approve MetaMask tx
 - ✅ Save address as `SEPOLIA_POOL`
 
-### 4.3 Deploy ChainLendBridge on Sepolia
+### 4.3 Deploy SepoliaBridge
 
-- Contract: `ChainLendBridge`
+- Contract: `SepoliaBridge` (ChainLendBridge)
 - Constructor inputs:
   ```
   _endpoint: 0x6EDCE65403992e310A62460808c4b910D972f10f
@@ -186,47 +196,39 @@ contracts/
 
 ## 5. Wire Amoy Contracts
 
-> Switch MetaMask back to **Polygon Amoy**.
-> In Remix Deploy tab, select the correct deployed contract from the dropdown.
+> Switch MetaMask to **Polygon Amoy**.
 
-### 5.1 Wire AmoyBridge → AmoyPool
+### 5.1 AmoyBridge → AmoyPool
 
-Select `ChainLendBridge` at `AMOY_BRIDGE`, call:
-
+Select `AmoyBridge` at `AMOY_BRIDGE`, call:
 ```
-setLendingPool(_pool): <AMOY_POOL>
+setLendingPool(_lendingPool): <AMOY_POOL>
 ```
 → Approve MetaMask tx
 
-```
-setRemoteEid(_eid): 40161
-```
-→ Approve MetaMask tx
-
-### 5.2 Set Peer on Amoy Bridge
+### 5.2 Set Peer on AmoyBridge
 
 The peer address must be zero-padded to `bytes32`.
-Calculate it like this:
 ```
-Take SEPOLIA_BRIDGE address (no 0x prefix)
-Pad with zeros on the LEFT to make 64 hex chars total
-Add 0x prefix
+Take SEPOLIA_BRIDGE address without 0x prefix
+Pad with zeros on the LEFT to make 64 hex characters total
+Add 0x prefix back
 
-Example: if SEPOLIA_BRIDGE = 0x3C972A74Fc0dAD0Fa32CeD08C8334B521E44aC83
-Result:  0x0000000000000000000000003C972A74Fc0dAD0Fa32CeD08C8334B521E44aC83
+Example: SEPOLIA_BRIDGE = 0xba029eF4dA8f8771217A37ebc5196E42ec6ada0a
+Result:  0x000000000000000000000000ba029eF4dA8f8771217A37ebc5196E42ec6ada0a
 ```
 
-Call on Amoy Bridge:
+Call on `AmoyBridge`:
 ```
 setPeer(_eid, _peer):
   _eid:  40161
-  _peer: 0x000000000000000000000000<SEPOLIA_BRIDGE_NO_0x>
+  _peer: 0x000000000000000000000000<SEPOLIA_BRIDGE_WITHOUT_0x>
 ```
 → Approve MetaMask tx
 
-### 5.3 Wire AmoyPool → AmoyBridge
+### 5.3 AmoyPool → AmoyBridge
 
-Select `LendingPool` at `AMOY_POOL`, call:
+Select `AmoyLendingPool` at `AMOY_POOL`, call:
 ```
 setBridge(_bridge): <AMOY_BRIDGE>
 ```
@@ -238,43 +240,41 @@ setBridge(_bridge): <AMOY_BRIDGE>
 
 > Switch MetaMask to **Ethereum Sepolia**.
 
-### 6.1 Wire SepoliaBridge → SepoliaPool
+### 6.1 SepoliaBridge → SepoliaPool
 
-Select `ChainLendBridge` at `SEPOLIA_BRIDGE`, call:
-
+Select `SepoliaBridge` at `SEPOLIA_BRIDGE`, call:
 ```
 setLendingPool(_pool): <SEPOLIA_POOL>
 ```
 → Approve MetaMask tx
 
 ```
-setRemoteEid(_eid): 40267
+setAmoyEid(_eid): 40267
 ```
 → Approve MetaMask tx
 
-### 6.2 Set Peer on Sepolia Bridge
+### 6.2 Set Peer on SepoliaBridge
 
-Calculate bytes32 for AMOY_BRIDGE:
 ```
-Take AMOY_BRIDGE address (no 0x prefix)
-Pad with zeros on the LEFT to 64 hex chars
+Take AMOY_BRIDGE address without 0x prefix
+Pad with zeros on LEFT to 64 hex characters
 Add 0x prefix
 
-Example: if AMOY_BRIDGE = 0xaAFE5a3d4bD40092A637c60A6f331FF7e20a9d78
-Result:  0x000000000000000000000000aAFE5a3d4bD40092A637c60A6f331FF7e20a9d78
+Example: AMOY_BRIDGE = 0xe5c7BeF3C839Bc1a6915B4211c3D74Ca77B5975a
+Result:  0x000000000000000000000000e5c7BeF3C839Bc1a6915B4211c3D74Ca77B5975a
 ```
 
-Call on Sepolia Bridge:
+Call on `SepoliaBridge`:
 ```
 setPeer(_eid, _peer):
   _eid:  40267
-  _peer: 0x000000000000000000000000<AMOY_BRIDGE_NO_0x>
+  _peer: 0x000000000000000000000000<AMOY_BRIDGE_WITHOUT_0x>
 ```
 → Approve MetaMask tx
 
-### 6.3 Wire SepoliaPool → SepoliaBridge
+### 6.3 SepoliaPool → SepoliaBridge
 
-Select `LendingPool` at `SEPOLIA_POOL`, call:
+Select `SepoliaLendingPool` at `SEPOLIA_POOL`, call:
 ```
 setBridge(_bridge): <SEPOLIA_BRIDGE>
 ```
@@ -286,49 +286,36 @@ setBridge(_bridge): <SEPOLIA_BRIDGE>
 
 ### 7.1 Mint sUSDC to Sepolia Pool (loan capital)
 
-> Still on Sepolia.
+> Still on **Ethereum Sepolia**.
 
 Select `MockUSDC` at `SEPOLIA_SUSDC`, call:
 ```
 mint(_to, _amount):
   _to:     <SEPOLIA_POOL>
-  _amount: 500000000000     ← 500,000 sUSDC (6 decimals: 500000 × 10^6)
+  _amount: 500000000000    ← 500,000 sUSDC (6 decimals: 500000 × 10^6)
 ```
 → Approve MetaMask tx
 
 **Verify:** Call `getPoolLiquidity()` on `SEPOLIA_POOL` → should return `500000000000`
 
-### 7.2 Add mUSDC to your wallet on Amoy (for testing)
+### 7.2 Verify mUSDC on Amoy
 
 > Switch MetaMask to **Polygon Amoy**.
 
 Your deployer wallet already has 1,000,000 mUSDC from Step 3.1.
-No extra minting needed for testing.
 
-**Verify:** Call `balanceOf(your_wallet)` on `AMOY_MUSDC` → should return `1000000000000`
+**Verify:** Call `balanceOf(<your_wallet>)` on `AMOY_MUSDC` → should return `1000000000000`
 
 ---
 
-## 8. Set Enforced Options (Critical)
+## 8. Set Enforced Options
 
-This tells LayerZero DVNs the minimum gas your `_lzReceive` requires.
-Without this, messages may be rejected with `InvalidOptions` on some DVN configs.
+> This step is only needed on **Sepolia Bridge**.
+> Amoy Bridge only receives — it never sends messages — so no enforced options needed there.
 
-### 8.1 On Amoy Bridge
+### On Sepolia Bridge only
 
-> On **Polygon Amoy**, select `ChainLendBridge` at `AMOY_BRIDGE`.
-
-Call `setEnforcedOptions`:
-```
-_eid:     40161
-_msgType: 1
-_options: 0x00030100110100000000000000000000000000049510
-```
-→ Approve MetaMask tx
-
-### 8.2 On Sepolia Bridge
-
-> Switch to **Ethereum Sepolia**, select `ChainLendBridge` at `SEPOLIA_BRIDGE`.
+> On **Ethereum Sepolia**, select `SepoliaBridge` at `SEPOLIA_BRIDGE`.
 
 Call `setEnforcedOptions`:
 ```
@@ -339,16 +326,44 @@ _options: 0x00030100110100000000000000000000000000049510
 → Approve MetaMask tx
 
 > **What is that hex?**
-> `0x00030100110100000000000000000000000000049510`
 > = `OptionsBuilder.newOptions().addExecutorLzReceiveOption(300_000, 0)`
 > encoded as Type 3 options bytes.
-> 300,000 gas is the executor gas limit for your `_lzReceive` function.
+> 300,000 gas is the executor gas limit for `_lzReceive` on Amoy.
 
 ---
 
-## 9. E2E Test — Full Borrow/Repay Flow
+## 9. Update Frontend constants.js
 
-This is the full 5-phase user journey. Go step by step and do not skip ahead.
+After all contracts are deployed and wired, update `constants.js` with new addresses:
+
+```javascript
+const ADDRESSES = {
+  amoy: {
+    mockUSDC:    "<AMOY_MUSDC>",
+    lendingPool: "<AMOY_POOL>",
+    bridge:      "<AMOY_BRIDGE>",
+  },
+  sepolia: {
+    mockUSDC:    "<SEPOLIA_SUSDC>",
+    lendingPool: "<SEPOLIA_POOL>",
+    bridge:      "<SEPOLIA_BRIDGE>",
+  },
+};
+```
+
+Also confirm the Sepolia RPC in `constants.js` is set to the reliable one:
+```javascript
+sepolia: {
+  rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"],
+  ...
+}
+```
+
+---
+
+## 10. E2E Test — Full Borrow/Repay Flow
+
+Go step by step. Do not skip ahead.
 
 ---
 
@@ -362,13 +377,13 @@ Select `MockUSDC` at `AMOY_MUSDC`, call:
 ```
 approve(_spender, _value):
   _spender: <AMOY_POOL>
-  _value:   2000000000    ← 2,000 mUSDC (we'll borrow 1,000, need 2× collateral)
+  _value:   2000000000    ← 2,000 mUSDC
 ```
 → Approve MetaMask tx
 
 **Step 2: Deposit into Amoy Pool**
 
-Select `LendingPool` at `AMOY_POOL`, call:
+Select `AmoyLendingPool` at `AMOY_POOL`, call:
 ```
 deposit(_amount): 2000000000    ← 2,000 mUSDC
 ```
@@ -376,13 +391,9 @@ deposit(_amount): 2000000000    ← 2,000 mUSDC
 
 **Step 3: Verify deposit**
 
-Call `getBalance(your_wallet)` on `AMOY_POOL`:
+Call `getAvailableBalance(<your_wallet>)` on `AMOY_POOL`:
 ```
-Expected:
-  principal: 2000000000
-  locked:    0
-  available: 2000000000
-  interest:  ~0 (tiny, just deposited)
+Expected: 2000000000
 ```
 ✅ Phase 1 complete
 
@@ -390,153 +401,144 @@ Expected:
 
 ### PHASE 2 — Cross-Chain Borrow on Sepolia
 
-> Still on **Polygon Amoy** — you pay MATIC gas here.
+> Switch MetaMask to **Ethereum Sepolia**.
+> Borrow is ALWAYS initiated from Sepolia — NOT from Amoy.
 
 **Step 1: Get the LayerZero fee quote**
 
-Select `ChainLendBridge` at `AMOY_BRIDGE`, call:
+Select `SepoliaBridge` at `SEPOLIA_BRIDGE`, call:
 ```
-quoteBorrow(_borrowAmount): 1000000000    ← 1,000 sUSDC to borrow
+quote(_msgType, _user, _amount):
+  _msgType: 1
+  _user:    <your_wallet>
+  _amount:  1000000000    ← 1,000 sUSDC to borrow
 ```
 → This is a `view` call, no tx needed.
-→ Returns a number like `1234567890000000` (in wei)
-→ Convert to MATIC: divide by 1e18 (e.g., 0.00123 MATIC)
-✅ Note this value — call it `FEE_MATIC`
+→ Returns a number in wei, e.g. `123456789000000`
+→ Add 20% buffer: multiply by 1.2
+✅ Note this value as `FEE_ETH`
 
-**Step 2: Call lockAndBorrow**
+**Step 2: Call requestBorrow**
 
-Still on `ChainLendBridge` at `AMOY_BRIDGE`:
-- Set **VALUE** field in Remix to `FEE_MATIC` (in wei, the exact number from quoteBorrow)
-  > In Remix: above the function inputs, set "VALUE" field to the quoted fee in wei
+Still on `SepoliaBridge` at `SEPOLIA_BRIDGE`:
+- Set the **VALUE** field in Remix to `FEE_ETH` (in wei, with 20% buffer)
 ```
-lockAndBorrow(_borrowAmount): 1000000000    ← 1,000 sUSDC
+requestBorrow(_amount): 1000000000    ← 1,000 sUSDC
 ```
-→ Approve MetaMask tx (you'll pay MATIC)
+→ Approve MetaMask tx (you pay ETH for LZ fee)
 
-**Step 3: Confirm collateral locked on Amoy**
+**Step 3: Track on LayerZero Scan**
 
-Call `getBalance(your_wallet)` on `AMOY_POOL`:
-```
-Expected:
-  principal: 2000000000
-  locked:    2000000000   ← all locked as 2× collateral
-  available: 0
-  interest:  ~0
-```
-
-**Step 4: Track the message on LayerZero Scan**
-
-Go to: https://testnet.layerzeroscan.com
+Go to https://testnet.layerzeroscan.com
 Search your tx hash from Step 2.
-Wait for status: `DELIVERED` ✅ (usually 30–90 seconds)
+Wait for status: `DELIVERED` ✅ (usually 1-3 minutes)
 
-> If status stays `INFLIGHT` for >5 minutes, see Troubleshooting section.
+**Step 4: Confirm collateral locked on Amoy**
 
----
+> Switch MetaMask to **Polygon Amoy**.
 
-### PHASE 3 — Verify Loan on Sepolia
+Call `getLockedBalance(<your_wallet>)` on `AMOY_POOL`:
+```
+Expected: 2000000000   ← 2,000 mUSDC (2× borrow amount)
+```
+
+**Step 5: Release loan via adminReleaseLoan**
 
 > Switch MetaMask to **Ethereum Sepolia**.
 
-**Step 1: Check your sUSDC balance**
-
-In MetaMask, import the sUSDC token: `SEPOLIA_SUSDC` address.
-Balance should show **1,000 sUSDC**.
-
-Or call `balanceOf(your_wallet)` on `MockUSDC` at `SEPOLIA_SUSDC`:
+Select `SepoliaLendingPool` at `SEPOLIA_POOL`, call:
 ```
-Expected: 1000000000
+adminReleaseLoan(_user, _amount):
+  _user:   <your_wallet>
+  _amount: 1000000000    ← 1,000 sUSDC
 ```
+→ Approve MetaMask tx
 
-**Step 2: Check your debt**
+**Step 6: Verify sUSDC received**
 
-Call `getDebt(your_wallet)` on `LendingPool` at `SEPOLIA_POOL`:
+Call `balanceOf(<your_wallet>)` on `MockUSDC` at `SEPOLIA_SUSDC`:
 ```
-Expected:
-  principal: 1000000000
-  interest:  ~0 (small, just borrowed)
-  total:     ~1000000000
+Expected: 1000000000   ← 1,000 sUSDC in wallet
 ```
-✅ Phase 3 confirmed. You now have borrowed sUSDC on Sepolia.
+✅ Phase 2 complete
 
 ---
 
-### PHASE 4 — Repay Loan on Sepolia
+### PHASE 3 — Repay Loan on Sepolia
 
 > Still on **Ethereum Sepolia**.
 
-**Step 1: Check exact debt**
+**Step 1: Check your principal**
 
-Call `getDebt(your_wallet)` on `SEPOLIA_POOL`:
+Call `loans(<your_wallet>)` on `SEPOLIA_POOL`:
 ```
-Returns: (principal, interest, total)
+Returns: principal (e.g. 1000000000)
 ```
-Note the `total` value. Add ~1% buffer for interest accruing during tx.
-Example: total = `1000001234` → use `1010000000` to be safe.
-Call this `REPAY_AMOUNT`.
+Repay amount = principal + 10,000,000 (flat 10 sUSDC fee)
+Example: `1000000000 + 10000000 = 1010000000`
 
-**Step 2: Approve sUSDC to Sepolia Pool (NOT the bridge)**
+**Step 2: Approve sUSDC to Sepolia Pool**
 
 Select `MockUSDC` at `SEPOLIA_SUSDC`, call:
 ```
 approve(_spender, _value):
   _spender: <SEPOLIA_POOL>    ← approve the POOL, not the bridge
-  _value:   <REPAY_AMOUNT>
+  _value:   1010000000        ← principal + 10 sUSDC flat fee
 ```
 → Approve MetaMask tx
 
-**Step 3: Get the LayerZero fee quote for repay**
+**Step 3: Get LayerZero fee quote for repay**
 
-Select `ChainLendBridge` at `SEPOLIA_BRIDGE`, call:
+Select `SepoliaBridge` at `SEPOLIA_BRIDGE`, call:
 ```
-quoteRepay(_amount): <REPAY_AMOUNT>
+quote(_msgType, _user, _amount):
+  _msgType: 3
+  _user:    <your_wallet>
+  _amount:  1000000000    ← principal amount
 ```
-→ Returns fee in wei (ETH). Call it `FEE_ETH`.
+→ Returns fee in wei. Add 20% buffer. Note as `FEE_ETH`.
 
 **Step 4: Call repayAndUnlock**
 
-Still on `ChainLendBridge` at `SEPOLIA_BRIDGE`:
-- Set **VALUE** field in Remix to `FEE_ETH` (in wei)
+Still on `SepoliaBridge` at `SEPOLIA_BRIDGE`:
+- Set **VALUE** field in Remix to `FEE_ETH` (with 20% buffer)
 ```
-repayAndUnlock(_amount): <REPAY_AMOUNT>
+repayAndUnlock()
 ```
-→ Approve MetaMask tx (you'll pay ETH + sUSDC pulled from wallet)
+→ Approve MetaMask tx (ETH fee + sUSDC pulled from wallet)
 
-**Step 5: Verify debt cleared on Sepolia**
+**Step 5: Verify debt cleared**
 
-Call `getDebt(your_wallet)` on `SEPOLIA_POOL`:
+Call `loans(<your_wallet>)` on `SEPOLIA_POOL`:
 ```
-Expected:
-  principal: 0
-  interest:  0
-  total:     0
+Expected: principal = 0, active = false
 ```
 
 **Step 6: Track on LayerZero Scan**
 
-Go to https://testnet.layerzeroscan.com
 Search repay tx hash → wait for `DELIVERED` ✅
 
 ---
 
-### PHASE 5 — Withdraw Collateral on Amoy
+### PHASE 4 — Withdraw Collateral on Amoy
 
 > Switch MetaMask to **Polygon Amoy**.
 
 **Step 1: Verify collateral unlocked**
 
-Call `getBalance(your_wallet)` on `AMOY_POOL`:
+Call `getLockedBalance(<your_wallet>)` on `AMOY_POOL`:
 ```
-Expected:
-  principal: 2000000000
-  locked:    0            ← unlocked by LayerZero message
-  available: 2000000000
-  interest:  <some small amount>
+Expected: 0   ← unlocked by LZ message
+```
+
+Call `getAvailableBalance(<your_wallet>)` on `AMOY_POOL`:
+```
+Expected: 2000000000   ← back to available
 ```
 
 **Step 2: Withdraw mUSDC**
 
-Select `LendingPool` at `AMOY_POOL`, call:
+Select `AmoyLendingPool` at `AMOY_POOL`, call:
 ```
 withdraw(_amount): 2000000000
 ```
@@ -544,42 +546,45 @@ withdraw(_amount): 2000000000
 
 **Step 3: Verify wallet balance**
 
-Call `balanceOf(your_wallet)` on `MockUSDC` at `AMOY_MUSDC`:
+Call `balanceOf(<your_wallet>)` on `AMOY_MUSDC`:
 ```
-Expected: ~998000000000  (original 1M minus what you kept in pool, roughly)
+Expected: original amount back in wallet
 ```
 
-✅ **Full cycle complete!** Deposited → Locked → Borrowed → Repaid → Unlocked → Withdrawn.
+✅ **Full cycle complete!**
+Deposited → Borrowed → Repaid → Unlocked → Withdrawn.
 
 ---
 
-## 10. Verify Everything on Explorers
+## 11. Verify on Explorers
 
-After the full test, confirm all 6 contracts are working:
+After the full test, confirm on each explorer:
 
 ### Amoy (https://amoy.polygonscan.com)
 | Contract | Check |
 |---|---|
 | `AMOY_MUSDC` | Token transfers visible |
-| `AMOY_POOL` | `deposits` mapping shows your address |
-| `AMOY_BRIDGE` | `lendingPool`, `remoteEid`, `peers` all set |
+| `AMOY_POOL` | `deposits` mapping shows your address, `locked` is 0 after repay |
+| `AMOY_BRIDGE` | `lendingPool` and `peers` correctly set |
 
 ### Sepolia (https://sepolia.etherscan.io)
 | Contract | Check |
 |---|---|
 | `SEPOLIA_SUSDC` | Token transfers visible |
-| `SEPOLIA_POOL` | `loans` mapping cleared after repay |
-| `SEPOLIA_BRIDGE` | `lendingPool`, `remoteEid`, `peers` all set |
+| `SEPOLIA_POOL` | `loans` mapping shows principal=0 after repay |
+| `SEPOLIA_BRIDGE` | `lendingPool`, `amoyEid`, `peers` correctly set |
 
 ### LayerZero Scan (https://testnet.layerzeroscan.com)
-- Both messages (borrow + repay) show `DELIVERED`
-- Source → Destination chain correctly shown
+- Borrow message: `DELIVERED` ✅
+- Repay message: `DELIVERED` ✅
+- Source OApp = Sepolia Bridge address
+- Destination OApp = Amoy Bridge address
 
 ---
 
-## 11. Deployed Addresses Log
+## 12. Deployed Addresses Log
 
-Fill this in as you deploy — keep it safe.
+Fill this in as you deploy. Update `constants.js` immediately after.
 
 ```
 === POLYGON AMOY ===
@@ -601,56 +606,57 @@ Sepolia EID    : 40161
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### ❌ Remix compile error: "File not found @layerzerolabs/..."
 - Wait 10 seconds and click Compile again
-- Remix fetches npm packages from unpkg on first compile — it's slow
-- If persists: try clearing Remix cache (Settings → Clear Cache)
+- Remix fetches npm packages from unpkg on first compile — it is slow
+- If it persists: Settings → Clear Cache → refresh page
 
 ### ❌ MetaMask: "Transaction underpriced"
-- In MetaMask, click Edit Gas → increase gas price slightly
-- Amoy can be congested — try again after 1-2 minutes
+- Click Edit Gas in MetaMask and increase gas price slightly
+- Amoy can be congested — wait 1-2 minutes and retry
 
-### ❌ `lockAndBorrow` reverts: "LendingPool: insufficient collateral"
-- Your available balance on Amoy Pool is less than `borrowAmount × 2`
-- Either deposit more mUSDC or reduce borrow amount
-- Check: `getBalance(wallet)` → `available` must be >= `borrowAmount × 2`
+### ❌ requestBorrow reverts: "NotEnoughNative"
+- msg.value passed is less than the LZ fee
+- Re-run `quote()` — fee changes each block
+- Always add 20% buffer: `fee * 120 / 100`
 
-### ❌ `lockAndBorrow` reverts: "NotEnoughNative"
-- msg.value < quoted fee
-- Re-run `quoteBorrow()` — fee changes slightly each block
-- Add 10% buffer to the quoted fee when setting VALUE in Remix
+### ❌ requestBorrow reverts: "Amoy EID not set"
+- Call `setAmoyEid(40267)` on SepoliaBridge first
 
-### ❌ LayerZero message stuck `INFLIGHT` for >5 min
-- Usually means `_lzReceive` reverted on destination, blocking the channel
-- Go to destination chain explorer, find the EndpointV2 contract
-- Call `lzReceive()` manually with higher gas
-- Or check: is `setPeer` correct on both sides? Is `setBridge` done?
+### ❌ LayerZero message BLOCKED on scan
+- `_lzReceive` on Amoy reverted — channel is now blocked
+- Common cause: `setBridge` not called on AmoyPool, so `onlyBridge` rejects lock()
+- Fix: verify `AMOY_BRIDGE` is correctly set via `setBridge` on `AMOY_POOL`
+- To unblock: call `EndpointV2.lzReceive()` manually on Amoy with higher gas
 
-### ❌ `repayAndUnlock` reverts: "Bridge: no active loan"
-- `getDebt()` returned principal=0 — loan doesn't exist on Sepolia pool
+### ❌ LayerZero message WAITING FOR ULN CONFIG
+- The source OApp address does not match what is deployed/wired
+- Check: is `constants.js` pointing to the correct `SEPOLIA_BRIDGE` address?
+- This error means the bridge contract calling `_lzSend` was never registered with LZ DVNs
+- Solution: verify you are using the correctly deployed and wired bridge address
+
+### ❌ repayAndUnlock reverts: "No active loan"
+- `loans[user].active` is false — loan does not exist on Sepolia
 - Either borrow message never delivered (check LZ scan) or already repaid
 
-### ❌ `repayAndUnlock` reverts: "ERC20: insufficient allowance"
+### ❌ repayAndUnlock reverts: "ERC20: insufficient allowance"
 - You approved the BRIDGE instead of the POOL
-- Approve `SEPOLIA_POOL` address for sUSDC, not the bridge
-
-### ❌ `repayAndUnlock` reverts: "LendingPool: must cover at least principal"
-- `_amount` passed is less than the principal (1,000,000,000 = 1000 sUSDC)
-- Use `getDebt()` total + 1% buffer
+- Approve `SEPOLIA_POOL` address for sUSDC, not the bridge address
 
 ### ❌ Collateral still locked after repay message DELIVERED
-- Check events on Amoy Bridge: `CollateralUnlocked(user, amount, success=false)`
-- If `success=false`, the `pool.unlock()` call failed silently (try/catch)
-- Check: `AMOY_BRIDGE` is set as bridge on `AMOY_POOL` via `setBridge`?
-- Check: the `amount * 2` passed to unlock <= `d.locked` on Amoy pool?
+- Check `setBridge` on AmoyPool — is it set to `AMOY_BRIDGE`?
+- Check Amoy Bridge events for `UnlockFailed` — means unlock() silently failed
+- Verify `locked[user]` >= `amount * 2` before unlock is called
 
-### ❌ `OnlyPeer` error on LayerZero Scan
+### ❌ OnlyPeer error on LayerZero Scan
 - `setPeer` is wrong or missing on one side
-- Re-check the bytes32 padding — must be 32 bytes total, left-padded with zeros
+- Re-check bytes32 padding — must be exactly 32 bytes, left-padded with zeros
 - Format: `0x000000000000000000000000{40-char-address-no-0x}`
+- Both bridges must have each other set as peer
 
 ---
 
-*End of deployment guide. All 6 contracts deployed and wired = ChainLend fully operational.*
+*End of deployment guide.*
+*All 6 contracts deployed, wired and funded = ChainLend fully operational.*

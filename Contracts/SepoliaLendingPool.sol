@@ -9,33 +9,31 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 /**
  * @title SepoliaLendingPool
  * @notice Manages loans on Ethereum Sepolia (the Loan Chain).
- * @dev Receives loan releases via adminReleaseLoan() called by frontend owner
- *      after LayerZero confirms collateral is locked on Amoy.
+ * @dev Loans use a flat 10 sUSDC repayment fee — no time-based interest.
+ *      adminReleaseLoan() is called by frontend owner after LZ confirms lock on Amoy.
+ *      repay() is called by SepoliaBridge after user approves repayment.
  */
 contract SepoliaLendingPool is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
 
     // ─── Constants ───────────────────────────────────────────────────
-    uint256 public constant BORROW_APR       = 8;    // 8% per year
-    uint256 public constant SECONDS_PER_YEAR = 365 days;
-    uint256 public constant LTV_PERCENT      = 50;   // 50% loan-to-value
+    uint256 public constant FLAT_FEE = 10e6; // 10 sUSDC flat repayment fee (6 decimals)
 
     // ─── State ───────────────────────────────────────────────────────
-    IERC20 public immutable token;     // sUSDC on Sepolia
-    address public bridge;             // ChainLendBridge on Sepolia
-    uint256 public totalBorrowed;      // total outstanding loans
+    IERC20  public immutable token;  // sUSDC on Sepolia
+    address public bridge;           // SepoliaBridge address
+    uint256 public totalBorrowed;    // total outstanding principal
 
     struct LoanInfo {
-        uint256 principal;             // original loan amount
-        uint256 interestSnapshot;      // accrued interest at last snapshot
-        uint256 lastSnapshotTime;      // timestamp of last snapshot
+        uint256 principal; // original loan amount
+        bool    active;    // true = loan exists
     }
 
     mapping(address => LoanInfo) public loans;
 
     // ─── Events ──────────────────────────────────────────────────────
     event LoanReleased(address indexed user, uint256 amount);
-    event LoanRepaid(address indexed user, uint256 principal, uint256 interest);
+    event LoanRepaid(address indexed user, uint256 principal, uint256 fee);
     event BridgeSet(address indexed bridge);
 
     // ─── Constructor ─────────────────────────────────────────────────
@@ -54,13 +52,11 @@ contract SepoliaLendingPool is Ownable, ReentrancyGuard {
         emit BridgeSet(_bridge);
     }
 
-    // ─── Core: Release Loan (called by frontend owner after LZ confirms) ──
+    // ─── Core: Release Loan ──────────────────────────────────────────
     /**
-     * @notice Release sUSDC loan to user after Amoy collateral is confirmed locked.
-     * @dev Owner calls this after frontend detects locked[user] change on Amoy.
-     *      MUST use _snapshotLoan to start the 8% APR clock correctly.
-     *      MUST update totalBorrowed for accurate pool accounting.
-     * @param user  The borrower address.
+     * @notice Releases sUSDC loan to user after Amoy collateral confirmed locked.
+     * @dev onlyOwner — frontend calls this after polling detects lock on Amoy.
+     * @param user   The borrower address.
      * @param amount The loan amount in sUSDC (6 decimals).
      */
     function adminReleaseLoan(
@@ -69,22 +65,16 @@ contract SepoliaLendingPool is Ownable, ReentrancyGuard {
     ) external onlyOwner nonReentrant {
         require(user != address(0), "Zero address");
         require(amount > 0, "Zero amount");
-        require(loans[user].principal == 0, "Loan already active");
+        require(!loans[user].active, "Loan already active");
         require(
             token.balanceOf(address(this)) >= amount,
-            "Insufficient liquidity in pool"
+            "Insufficient pool liquidity"
         );
 
-        // Start the interest clock — critical for getDebt() to work correctly
-        _snapshotLoan(user);
-
-        // Record the loan principal
         loans[user].principal = amount;
+        loans[user].active    = true;
+        totalBorrowed        += amount;
 
-        // Update global pool accounting
-        totalBorrowed += amount;
-
-        // Transfer sUSDC to borrower
         token.safeTransfer(user, amount);
 
         emit LoanReleased(user, amount);
@@ -92,82 +82,55 @@ contract SepoliaLendingPool is Ownable, ReentrancyGuard {
 
     // ─── Core: Repay ─────────────────────────────────────────────────
     /**
-     * @notice Bridge calls this to repay a user's loan.
-     * @dev msg.sender must be the bridge (onlyBridge security).
-     *      Pulls sUSDC directly from user's wallet via safeTransferFrom.
-     *      User must have approved SepoliaLendingPool before calling.
+     * @notice Collects repayment from user. Called by SepoliaBridge only.
+     * @dev Pulls principal + FLAT_FEE (10 sUSDC) from user wallet.
+     *      User must approve SepoliaLendingPool for (principal + 10e6) before calling.
+     *      msg.sender context: bridge calls this, so user address passed explicitly.
+     * @param user The borrower address.
      */
-    function repay(address user, uint256 amount) external nonReentrant {
-        require(msg.sender == bridge, "Only bridge can call repay");
+    function repay(address user) external nonReentrant {
+        require(msg.sender == bridge, "Only bridge");
 
         LoanInfo storage loan = loans[user];
-        require(loan.principal > 0, "No active loan");
+        require(loan.active, "No active loan");
 
-        uint256 totalDebt = getDebt(user);
-        require(amount >= totalDebt, "Amount less than total debt");
+        uint256 principal   = loan.principal;
+        uint256 repayAmount = principal + FLAT_FEE;
 
-        uint256 principal = loan.principal;
-        uint256 interest  = totalDebt - principal;
-
-        // Clear loan state BEFORE transfer (reentrancy protection)
+        // Clear loan BEFORE transfer (reentrancy protection)
         delete loans[user];
         totalBorrowed -= principal;
 
         // Pull repayment directly from user wallet
-        token.safeTransferFrom(user, address(this), totalDebt);
+        // User must have approved this contract for repayAmount
+        token.safeTransferFrom(user, address(this), repayAmount);
 
-        emit LoanRepaid(user, principal, interest);
+        emit LoanRepaid(user, principal, FLAT_FEE);
     }
 
-    // ─── View: Get Total Debt ─────────────────────────────────────────
+    // ─── View ─────────────────────────────────────────────────────────
     /**
-     * @notice Returns current total debt (principal + accrued 8% APR interest).
+     * @notice Returns total amount user needs to repay (principal + flat fee).
      */
-    function getDebt(address user) public view returns (uint256) {
-        LoanInfo memory loan = loans[user];
-        if (loan.principal == 0) return 0;
-
-        uint256 timeElapsed = block.timestamp - loan.lastSnapshotTime;
-
-        uint256 accruedInterest = (loan.principal * BORROW_APR * timeElapsed)
-            / (100 * SECONDS_PER_YEAR);
-
-        return loan.principal + loan.interestSnapshot + accruedInterest;
+    function getRepayAmount(address user) external view returns (uint256) {
+        if (!loans[user].active) return 0;
+        return loans[user].principal + FLAT_FEE;
     }
 
-    // ─── Internal: Snapshot ──────────────────────────────────────────
-    /**
-     * @notice Snapshots current accrued interest and resets the clock.
-     * @dev Must be called before any principal change to preserve interest.
-     */
-    function _snapshotLoan(address user) internal {
-        LoanInfo storage loan = loans[user];
-
-        if (loan.lastSnapshotTime != 0 && loan.principal > 0) {
-            uint256 timeElapsed = block.timestamp - loan.lastSnapshotTime;
-            uint256 newInterest = (loan.principal * BORROW_APR * timeElapsed)
-                / (100 * SECONDS_PER_YEAR);
-            loan.interestSnapshot += newInterest;
-        }
-
-        loan.lastSnapshotTime = block.timestamp;
-    }
-
-    // ─── View: Pool Info ─────────────────────────────────────────────
     function getPoolLiquidity() external view returns (uint256) {
         return token.balanceOf(address(this));
     }
 
     function getLoanInfo(address user) external view returns (
         uint256 principal,
-        uint256 totalDebt,
-        uint256 startTime
+        uint256 repayAmount,
+        bool    active
     ) {
         LoanInfo memory loan = loans[user];
         return (
             loan.principal,
-            getDebt(user),
-            loan.lastSnapshotTime
+            loan.active ? loan.principal + FLAT_FEE : 0,
+            loan.active
         );
     }
 }
