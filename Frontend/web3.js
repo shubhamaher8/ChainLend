@@ -39,7 +39,7 @@ async function connectWallet() {
 }
 
 // ─── Switch Network ───────────────────────────────────────────────────────────
-// IMPORTANT: Re-instantiate BrowserProvider + signer after every chain switch.
+// Re-instantiate BrowserProvider + signer after every chain switch.
 // ethers v6 requires this — stale provider after switch causes wrong chain errors.
 
 async function switchToAmoy() {
@@ -136,7 +136,7 @@ async function isOnSepolia() {
 
 // ─── Format / Parse Helpers ───────────────────────────────────────────────────
 function formatUSDC(rawAmount) {
-  // BigInt with 6 decimals → human readable string with 2 decimal places
+  // BigInt with 6 decimals → human readable string
   return (Number(rawAmount) / 1_000_000).toFixed(2);
 }
 

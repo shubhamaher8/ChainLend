@@ -58,8 +58,10 @@ async function refreshAllBalances() {
 
     // ── Sepolia balances — separate try/catch so Amoy always shows ────
     try {
+      // Use NETWORKS.sepolia.rpcUrls[0] — no hardcoded URL
+      // Change RPC in constants.js and it updates everywhere automatically
       const sepoliaReadProvider = new ethers.JsonRpcProvider(
-        "https://ethereum-sepolia-rpc.publicnode.com"
+        NETWORKS.sepolia.rpcUrls[0]
       );
       const sepoliaLP = new ethers.Contract(
         ADDRESSES.sepolia.lendingPool,
@@ -73,11 +75,10 @@ async function refreshAllBalances() {
       );
 
       const [repayAmount, sepoliaBalance] = await Promise.all([
-        sepoliaLP.getRepayAmount(userAddress),   // principal + 10 sUSDC flat fee
+        sepoliaLP.getRepayAmount(userAddress),
         sepoliaUSDC.balanceOf(userAddress),
       ]);
 
-      // Active debt display — show repay amount (what user owes)
       document.getElementById("sepolia-debt").textContent =
         repayAmount > 0n
           ? formatUSDC(repayAmount) + " sUSDC"
@@ -86,7 +87,7 @@ async function refreshAllBalances() {
       document.getElementById("sepolia-balance").textContent =
         formatUSDC(sepoliaBalance) + " sUSDC";
 
-      // Update repay button debt display
+      // Update repay section debt display
       const repayEl = document.getElementById("repay-debt-amount");
       if (repayEl) {
         repayEl.textContent = repayAmount > 0n
@@ -154,7 +155,7 @@ async function handleBorrow() {
 
     const amountBN = parseUSDC(amount);
 
-    // Get LayerZero fee quote + 20% buffer for gas fluctuations
+    // Get LayerZero fee quote + 20% buffer
     setStatus("Getting LayerZero fee quote...", "info");
     const lzFee = await contracts.sepolia.bridge.quote(
       MSG_BORROW_REQUEST,
@@ -168,7 +169,7 @@ async function handleBorrow() {
       "info"
     );
 
-    // Send borrow request → LayerZero message fires to Amoy
+    // Send borrow request → LZ message fires to Amoy
     const tx = await contracts.sepolia.bridge.requestBorrow(amountBN, {
       value: feeWithBuffer,
     });
@@ -183,8 +184,7 @@ async function handleBorrow() {
     document.getElementById("lz-scan-link").href = "https://testnet.layerzeroscan.com";
     document.getElementById("lz-scan-link").style.display = "inline";
 
-    // Poll Amoy until collateral is locked (LZ delivered)
-    // expectedLockedAmount = amountBN * 2 because 50% LTV locks 2x
+    // Poll Amoy until collateral locked — expectedLocked = amount * 2 (50% LTV)
     const locked = await pollUntilLocked(userAddress, amountBN * 2n);
 
     if (!locked) {
@@ -218,8 +218,7 @@ async function handleRepay() {
     setStatus("Switching to Sepolia...", "info");
     await switchToSepolia();
 
-    // Step 1: Fetch exact repay amount from contract (principal + flat 10 sUSDC fee)
-    // Use getRepayAmount — single source of truth, no manual calculation needed
+    // Fetch exact repay amount — principal + flat 10 sUSDC fee
     const repayAmount = await contracts.sepolia.lendingPool.getRepayAmount(userAddress);
     if (repayAmount === 0n) {
       setStatus("No active loan to repay.", "error");
@@ -231,8 +230,8 @@ async function handleRepay() {
       "info"
     );
 
-    // Step 2: Approve SepoliaLendingPool for exact repay amount
-    // Approve the POOL not the bridge — pool pulls tokens inside repay()
+    // Step 1: Approve SepoliaLendingPool for exact repay amount
+    // Approve POOL not bridge — pool pulls tokens inside repay()
     const approveTx = await contracts.sepolia.mockUSDC.approve(
       ADDRESSES.sepolia.lendingPool,
       repayAmount
@@ -240,8 +239,7 @@ async function handleRepay() {
     await approveTx.wait();
     setStatus("Approved! Getting LayerZero fee...", "info");
 
-    // Step 3: Get LZ fee quote for repay unlock message
-    // quote needs principal — fetch from loan info
+    // Step 2: Get LZ fee — need principal for quote
     const [principal] = await contracts.sepolia.lendingPool.loans(userAddress);
     const lzFee = await contracts.sepolia.bridge.quote(
       MSG_REPAY_UNLOCK,
@@ -250,7 +248,7 @@ async function handleRepay() {
     );
     const feeWithBuffer = (lzFee * 120n) / 100n;
 
-    // Step 4: Call repayAndUnlock — no amount needed, bridge reads from pool internally
+    // Step 3: repayAndUnlock — no amount param, bridge reads from pool internally
     setStatus("Step 2/2 — Repaying loan + sending unlock message to Amoy...", "info");
     const repayTx = await contracts.sepolia.bridge.repayAndUnlock({
       value: feeWithBuffer,
@@ -266,7 +264,7 @@ async function handleRepay() {
     document.getElementById("lz-scan-link").href = "https://testnet.layerzeroscan.com";
     document.getElementById("lz-scan-link").style.display = "inline";
 
-    // Step 5: Poll Amoy until collateral is unlocked
+    // Poll Amoy until collateral unlocked
     const unlocked = await pollUntilUnlocked(userAddress);
 
     if (!unlocked) {
@@ -315,13 +313,6 @@ async function handleWithdraw() {
 }
 
 // ─── POLLING: Wait Until Locked ───────────────────────────────────────────────
-/**
- * Polls AmoyLendingPool.locked(user) every 10 seconds.
- * Returns true when locked >= expectedLockedAmount.
- * Returns false after 5 minute timeout.
- *
- * 10s interval — avoids RPC 429 rate limiting on free tier RPCs.
- */
 async function pollUntilLocked(user, expectedLockedAmount) {
   const amoyRead = getAmoyReadContracts();
   const startTime = Date.now();
@@ -330,7 +321,6 @@ async function pollUntilLocked(user, expectedLockedAmount) {
   setStatus("⏳ Polling Amoy for lock confirmation (checking every 10s)...", "info");
 
   while (isPolling) {
-    // Timeout check
     if (Date.now() - startTime > POLL_TIMEOUT_MS) {
       isPolling = false;
       return false;
@@ -361,11 +351,6 @@ async function pollUntilLocked(user, expectedLockedAmount) {
 }
 
 // ─── POLLING: Wait Until Unlocked ────────────────────────────────────────────
-/**
- * Polls AmoyLendingPool.locked(user) every 10 seconds.
- * Returns true when locked === 0.
- * Returns false after 5 minute timeout.
- */
 async function pollUntilUnlocked(user) {
   const amoyRead = getAmoyReadContracts();
   const startTime = Date.now();
@@ -427,13 +412,13 @@ function _parseError(err) {
   if (err?.data?.message) return err.data.message;
   if (err?.message) {
     const msg = err.message;
-    if (msg.includes("user rejected"))        return "Transaction rejected by user.";
-    if (msg.includes("insufficient funds"))   return "Insufficient ETH/MATIC for gas.";
-    if (msg.includes("NotEnoughNative"))      return "Insufficient ETH for LayerZero fee.";
-    if (msg.includes("OnlyPeer"))             return "Bridge peer not set correctly.";
-    if (msg.includes("No active loan"))       return "No active loan found.";
-    if (msg.includes("Loan already active"))  return "You already have an active loan. Repay first.";
-    if (msg.includes("Only bridge"))          return "Internal error: wrong caller.";
+    if (msg.includes("user rejected"))       return "Transaction rejected by user.";
+    if (msg.includes("insufficient funds"))  return "Insufficient ETH/MATIC for gas.";
+    if (msg.includes("NotEnoughNative"))     return "Insufficient ETH for LayerZero fee.";
+    if (msg.includes("OnlyPeer"))            return "Bridge peer not set correctly.";
+    if (msg.includes("No active loan"))      return "No active loan found.";
+    if (msg.includes("Loan already active")) return "You already have an active loan. Repay first.";
+    if (msg.includes("Only bridge"))         return "Internal error: wrong caller.";
     return msg.slice(0, 120);
   }
   return "Unknown error.";

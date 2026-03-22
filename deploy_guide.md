@@ -120,7 +120,7 @@ contracts/
   ```
   _name:          Mock USDC
   _symbol:        mUSDC
-  _initialSupply: 1000000
+  _delegate: 0x003b739410f14b248A2A24cd4FC4021F40Fc2B20
   ```
 - Click **Deploy** → approve MetaMask tx
 - ✅ Save address as `AMOY_MUSDC`
@@ -163,7 +163,7 @@ contracts/
   ```
   _name:          Synthetic USDC
   _symbol:        sUSDC
-  _initialSupply: 0
+  _delegate: 0x003b739410f14b248A2A24cd4FC4021F40Fc2B20
   ```
 - Click **Deploy** → approve MetaMask tx
 - ✅ Save address as `SEPOLIA_SUSDC`
