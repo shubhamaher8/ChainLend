@@ -64,7 +64,7 @@
         <strong id="sepolia-balance">—</strong>
       </div>
       <div class="balance-row">
-        <span>Active Debt (8% APR)</span>
+        <span>Active Debt (flat fee)</span>
         <strong id="sepolia-debt">—</strong>
       </div>
     </div>
@@ -81,7 +81,7 @@
         <h4>Deposit Collateral</h4>
         <span class="chain-tag amoy-tag">Amoy</span>
       </div>
-      <p class="action-desc">Deposit mUSDC on Amoy to use as collateral.</p>
+      <p class="action-desc">Deposit mUSDC on Amoy to use as collateral. Earns 5% APY.</p>
       <div class="input-row">
         <input type="number" id="deposit-amount" placeholder="Amount (mUSDC)" min="0" />
         <button onclick="handleDeposit()" class="btn btn-amoy">Deposit</button>
@@ -118,12 +118,12 @@
         your collateral on Amoy automatically.
       </p>
       <div class="debt-display">
-        Total debt to repay: <strong id="repay-debt-amount">—</strong>
+        Total to repay: <strong id="repay-debt-amount">—</strong>
       </div>
       <button onclick="handleRepay()" class="btn btn-sepolia btn-full">
-        Repay Full Debt + Unlock Collateral
+        Repay Full Amount + Unlock Collateral
       </button>
-      <p class="action-note">⚡ Amount is auto-calculated (principal + 8% APR interest).</p>
+      <p class="action-note">⚡ Amount is auto-calculated (principal + 10 sUSDC flat fee).</p>
     </div>
 
     <!-- Withdraw -->

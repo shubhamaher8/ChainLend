@@ -1,12 +1,12 @@
 // ─── ChainLend Web3 Layer ─────────────────────────────────────────────────────
 // Handles wallet connection and contract instances using ethers.js v6
 
-let provider = null;
-let signer   = null;
+let provider    = null;
+let signer      = null;
 let userAddress = null;
 
-// Contract instances — populated after wallet connects
-let amoyReadProvider    = null; // read-only provider for Amoy polling
+// Contract instances — populated after wallet connects + chain switch
+let amoyReadProvider = null; // read-only provider for Amoy polling (no signer)
 let contracts = {
   amoy: {
     mockUSDC:    null,
@@ -25,12 +25,12 @@ async function connectWallet() {
     throw new Error("MetaMask not found. Please install MetaMask.");
   }
 
-  provider = new ethers.BrowserProvider(window.ethereum);
+  provider    = new ethers.BrowserProvider(window.ethereum);
   await provider.send("eth_requestAccounts", []);
   signer      = await provider.getSigner();
   userAddress = await signer.getAddress();
 
-  // Read-only provider for Amoy (used for polling — no signer needed)
+  // Read-only provider for Amoy — used during polling, no MetaMask needed
   amoyReadProvider = new ethers.JsonRpcProvider(
     NETWORKS.amoy.rpcUrls[0]
   );
@@ -39,6 +39,9 @@ async function connectWallet() {
 }
 
 // ─── Switch Network ───────────────────────────────────────────────────────────
+// IMPORTANT: Re-instantiate BrowserProvider + signer after every chain switch.
+// ethers v6 requires this — stale provider after switch causes wrong chain errors.
+
 async function switchToAmoy() {
   await _switchNetwork(NETWORKS.amoy);
   provider = new ethers.BrowserProvider(window.ethereum);
@@ -60,7 +63,7 @@ async function _switchNetwork(network) {
       params: [{ chainId: network.chainId }],
     });
   } catch (err) {
-    // Chain not added to MetaMask yet — add it
+    // Chain not added to MetaMask yet — add it automatically
     if (err.code === 4902) {
       await window.ethereum.request({
         method: "wallet_addEthereumChain",
@@ -104,7 +107,7 @@ function _initSepoliaContracts(signerOrProvider) {
   );
 }
 
-// ─── Read-only Amoy contracts (for polling, no MetaMask needed) ───────────────
+// ─── Read-only Amoy contracts (for polling — no MetaMask needed) ──────────────
 function getAmoyReadContracts() {
   return {
     lendingPool: new ethers.Contract(
@@ -115,7 +118,7 @@ function getAmoyReadContracts() {
   };
 }
 
-// ─── Get Current Chain ID ─────────────────────────────────────────────────────
+// ─── Chain Helpers ────────────────────────────────────────────────────────────
 async function getCurrentChainId() {
   const network = await provider.getNetwork();
   return Number(network.chainId);
@@ -131,18 +134,18 @@ async function isOnSepolia() {
   return chainId === 11155111;
 }
 
-// ─── Format / Parse helpers ───────────────────────────────────────────────────
+// ─── Format / Parse Helpers ───────────────────────────────────────────────────
 function formatUSDC(rawAmount) {
-  // rawAmount is BigInt with 6 decimals → human readable string
+  // BigInt with 6 decimals → human readable string with 2 decimal places
   return (Number(rawAmount) / 1_000_000).toFixed(2);
 }
 
 function parseUSDC(humanAmount) {
-  // humanAmount is string/number → BigInt with 6 decimals
+  // string/number → BigInt with 6 decimals
   return ethers.parseUnits(String(humanAmount), 6);
 }
 
-// ─── Listen for account / network changes ────────────────────────────────────
+// ─── Wallet Event Listeners ───────────────────────────────────────────────────
 function setupWalletListeners(onAccountChange, onChainChange) {
   if (!window.ethereum) return;
 

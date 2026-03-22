@@ -12,35 +12,36 @@ const NETWORKS = {
   sepolia: {
     chainId: "0xaa36a7", // 11155111 in hex
     chainName: "Ethereum Sepolia Testnet",
-    rpcUrls: ["https://rpc.sepolia.org"],
+    rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"], // reliable RPC
     nativeCurrency: { name: "SepoliaETH", symbol: "ETH", decimals: 18 },
     blockExplorerUrls: ["https://sepolia.etherscan.io"],
   },
 };
 
 // ─── Contract Addresses ───────────────────────────────────────────────────────
+// UPDATE THESE after every redeploy — always keep in sync with deployed contracts
 const ADDRESSES = {
   amoy: {
-    mockUSDC:     "0x26b37304CF6d608098c47E55A93D68e410A4879B",
-    lendingPool:  "0xc459C937Fe31Dbc67285b023F325fFAF52D7EfdB",
-    bridge:       "0xe5c7BeF3C839Bc1a6915B4211c3D74Ca77B5975a",
+    mockUSDC:    "0x26b37304CF6d608098c47E55A93D68e410A4879B",
+    lendingPool: "0xc459C937Fe31Dbc67285b023F325fFAF52D7EfdB",
+    bridge:      "0xe5c7BeF3C839Bc1a6915B4211c3D74Ca77B5975a",
   },
   sepolia: {
-    mockUSDC:     "0x013906BDE4a34b1dE06A7A8eDB0958337eb7FCA8",
-    lendingPool:  "0xC90344e41265aA345183Aa36b9D2f27010F3c150",
-    bridge:       "0x659aA7C850Cd57e0978856D3fdfABBB9CD776caa",
+    mockUSDC:    "0x013906BDE4a34b1dE06A7A8eDB0958337eb7FCA8",
+    lendingPool: "REDEPLOY_AND_PASTE_HERE", // SepoliaLendingPool — update after redeploy
+    bridge:      "REDEPLOY_AND_PASTE_HERE", // SepoliaBridge      — update after redeploy
   },
 };
 
 // ─── Protocol Params ──────────────────────────────────────────────────────────
-const LTV_PERCENT        = 50;     // 50% — borrow up to half of collateral
-const DEPOSIT_APY        = 5;      // 5% APY on deposits
-const BORROW_APR         = 8;      // 8% APR on borrows
+const LTV_PERCENT        = 50;       // 50% — borrow up to half of collateral
+const DEPOSIT_APY        = 5;        // 5% APY on deposits (Amoy)
+const FLAT_REPAY_FEE     = 10;       // flat 10 sUSDC repayment fee (no APR math)
 const USDC_DECIMALS      = 6;
 const USDC_UNIT          = 10n ** 6n; // 1 USDC = 1_000_000 units
 
 // ─── Polling Config ───────────────────────────────────────────────────────────
-const POLL_INTERVAL_MS   = 10_000; // 10 seconds — avoids RPC 429 rate limit
+const POLL_INTERVAL_MS   = 10_000;  // 10 seconds — avoids RPC 429 rate limit
 const POLL_TIMEOUT_MS    = 300_000; // 5 minutes max wait
 
 // ─── ABIs ─────────────────────────────────────────────────────────────────────
@@ -70,22 +71,31 @@ const AMOY_LENDING_POOL_ABI = [
 ];
 
 const SEPOLIA_LENDING_POOL_ABI = [
+  // Admin
   "function adminReleaseLoan(address user, uint256 amount)",
-  "function repay(uint256 amount)",
-  "function getDebt(address user) view returns (uint256)",
-  "function getLoanInfo(address user) view returns (uint256 principal, uint256 totalDebt, uint256 startTime)",
+  // Core — repay takes user address only, amount computed internally
+  "function repay(address user)",
+  // Views
+  "function getRepayAmount(address user) view returns (uint256)",
   "function getPoolLiquidity() view returns (uint256)",
-  "function loans(address) view returns (uint256 principal, uint256 interestSnapshot, uint256 lastSnapshotTime)",
+  "function getLoanInfo(address user) view returns (uint256 principal, uint256 repayAmount, bool active)",
+  // Loan mapping — simplified struct (principal + active only)
+  "function loans(address) view returns (uint256 principal, bool active)",
+  // Events
   "event LoanReleased(address indexed user, uint256 amount)",
-  "event LoanRepaid(address indexed user, uint256 principal, uint256 interest)",
+  "event LoanRepaid(address indexed user, uint256 principal, uint256 fee)",
 ];
 
 const SEPOLIA_BRIDGE_ABI = [
+  // Borrow — sends LZ message to lock collateral on Amoy
   "function requestBorrow(uint256 amount) payable returns (bytes32 guid)",
-  "function repayAndUnlock(uint256 amount) payable",
+  // Repay — no amount param, reads principal from pool internally
+  "function repayAndUnlock() payable",
+  // Fee quote — always call before borrow or repay, add 20% buffer
   "function quote(uint8 msgType, address user, uint256 amount) view returns (uint256 nativeFee)",
+  // Events
   "event BorrowRequested(address indexed user, uint256 amount, bytes32 guid)",
-  "event RepayUnlockSent(address indexed user, uint256 amount, bytes32 guid)",
+  "event RepayUnlockSent(address indexed user, uint256 principal, bytes32 guid)",
 ];
 
 // Message types (matches contract constants)
