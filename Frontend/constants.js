@@ -12,7 +12,7 @@ const NETWORKS = {
   sepolia: {
     chainId: "0xaa36a7", // 11155111 in hex
     chainName: "Ethereum Sepolia Testnet",
-    rpcUrls: ["https://rpc.sepolia.org"],
+    rpcUrls: ["https://ethereum-sepolia-rpc.publicnode.com"],
     nativeCurrency: { name: "SepoliaETH", symbol: "ETH", decimals: 18 },
     blockExplorerUrls: ["https://sepolia.etherscan.io"],
   },
