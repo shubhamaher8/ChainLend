@@ -27,6 +27,25 @@ Cross-chain coordination is handled by **LayerZero V2 OApp** messages. Tokens ne
 
 ---
 
+## Prototype Screenshots
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="assets/Homepage.png" alt="Homepage Screenshot" width="420"/>
+      <br/>
+      <b>Homepage View</b>
+    </td>
+    <td align="center">
+      <img src="assets/Dashboard.png" alt="Dashboard Screenshot" width="420"/>
+      <br/>
+      <b>Dashboard View</b>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## ✨ Key Features
 
 - 🔗 **Real Cross-Chain Lending** — Deposit collateral on Polygon Amoy, borrow on Ethereum Sepolia
