@@ -98,11 +98,14 @@ ChainLend/
 │   ├── SepoliaLendingPool.sol    # Loan pool on Ethereum Sepolia
 │   └── SepoliaBridge.sol         # LayerZero sender on Sepolia
 ├── Frontend/
-│   ├── index.html                # Main dApp interface
-│   ├── style.css                 # Dark-theme styling
+│   ├── index.html                # Homepage / landing page
+│   ├── dashboard.html            # Main dApp interface
+│   ├── style.css                 # Homepage styling
+│   ├── dashboard_style.css       # Dashboard dark-theme styling
+│   ├── app.js                    # Homepage script
+│   ├── dashboard_app.js          # Dashboard application logic & polling
 │   ├── constants.js              # Addresses, ABIs, protocol params
-│   ├── web3.js                   # Wallet & contract layer (ethers v6)
-│   └── app.js                    # Application logic & polling
+│   └── web3.js                   # Wallet & contract layer (ethers v6)
 ├── architecture.md               # Detailed architecture documentation
 ├── deploy_guide.md               # Step-by-step deployment guide
 └── README.md

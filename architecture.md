@@ -36,7 +36,7 @@ is done via **LayerZero V2 real messages**. Tokens never cross chains — only m
 │               FRONTEND LAYER                     │
 │          Vercel Hosted Web App                   │
 │                                                  │
-│  index.html   app.js   web3.js (ethers v6)       │
+│  dashboard.html   dashboard_app.js   web3.js (ethers v6)  │
 │                                                  │
 │  Role: Coordinator — talks to both chains        │
 │        Polls Amoy every 10s to detect LZ delivery│

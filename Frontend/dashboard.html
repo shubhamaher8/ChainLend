@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChainLend — Cross-Chain DeFi</title>
+  <link rel="stylesheet" href="dashboard_style.css" />
+</head>
+
+<body>
+
+  <!-- ─── Header ──────────────────────────────────────────────── -->
+  <header class="header">
+    <div class="header-inner">
+      <div class="logo">⛓️ ChainLend</div>
+      <div class="wallet-info">
+        <a href="index.html" class="header-nav-link">← Homepage</a>
+        <span id="wallet-address">Not connected</span>
+        <button id="connect-btn" onclick="handleConnect()">Connect Wallet</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ─── Status Bar ───────────────────────────────────────────── -->
+  <div id="status-message" class="status-box" style="display:none;"></div>
+
+
+
+  <!-- ─── Balances ─────────────────────────────────────────────── -->
+  <section class="balances-grid">
+
+    <div class="balance-card amoy-card">
+      <h3>🟣 Polygon Amoy <span class="chain-badge">Collateral Chain</span></h3>
+      <div class="balance-row">
+        <span>mUSDC in Wallet</span>
+        <strong id="amoy-wallet-balance">—</strong>
+      </div>
+      <div class="balance-row">
+        <span>Available Deposit</span>
+        <strong id="amoy-available">—</strong>
+      </div>
+      <div class="balance-row">
+        <span>Locked as Collateral</span>
+        <strong id="amoy-locked">—</strong>
+      </div>
+      <div class="balance-row">
+        <span>Earned Interest (5% APY)</span>
+        <strong id="amoy-interest">—</strong>
+      </div>
+      <div class="balance-row highlight">
+        <span>Max Borrowable (50% LTV)</span>
+        <strong id="max-borrow">—</strong>
+      </div>
+      <button class="refresh-btn" onclick="refreshAllBalances()">↻ Refresh</button>
+    </div>
+
+    <div class="balance-card sepolia-card">
+      <h3>🔵 Ethereum Sepolia <span class="chain-badge">Loan Chain</span></h3>
+      <div class="balance-row">
+        <span>sUSDC in Wallet</span>
+        <strong id="sepolia-balance">—</strong>
+      </div>
+      <div class="balance-row">
+        <span>Active Debt (flat fee)</span>
+        <strong id="sepolia-debt">—</strong>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ─── Actions ──────────────────────────────────────────────── -->
+  <section class="actions-grid">
+
+    <!-- Deposit -->
+    <div class="action-card">
+      <div class="action-header">
+        <span class="step-badge">1</span>
+        <h4>Deposit Collateral</h4>
+        <span class="chain-tag amoy-tag">Amoy</span>
+      </div>
+      <p class="action-desc">
+        Deposit mUSDC on Amoy to use as collateral. Your
+        funds are securely locked and earn 5% APY.
+      </p>
+      <div class="input-row">
+        <input type="number" id="deposit-amount" placeholder="Amount (mUSDC)" min="0" />
+        <button onclick="handleDeposit()" class="btn btn-amoy">Deposit</button>
+      </div>
+      <p class="action-note">⚡ Direct deposit on the Polygon Amoy testnet.</p>
+    </div>
+
+    <!-- Borrow -->
+    <div class="action-card">
+      <div class="action-header">
+        <span class="step-badge">2</span>
+        <h4>Borrow via LayerZero</h4>
+        <span class="chain-tag sepolia-tag">Sepolia</span>
+      </div>
+      <p class="action-desc">
+        Send a cross-chain message to lock collateral on Amoy,
+        then receive sUSDC on Sepolia. Max 50% LTV.
+      </p>
+      <div class="input-row">
+        <input type="number" id="borrow-amount" placeholder="Amount (sUSDC)" min="0" />
+        <button id="borrow-btn" onclick="handleBorrow()" class="btn btn-sepolia">Borrow</button>
+      </div>
+      <p class="action-note">⚡ LayerZero message takes 1–3 minutes to deliver.</p>
+    </div>
+
+    <!-- Repay -->
+    <div class="action-card">
+      <div class="action-header">
+        <span class="step-badge">3</span>
+        <h4>Repay + Unlock</h4>
+        <span class="chain-tag sepolia-tag">Sepolia → Amoy</span>
+      </div>
+      <p class="action-desc">
+        Repay sUSDC on Sepolia. LayerZero message unlocks
+        your collateral on Amoy automatically.
+      </p>
+      <div class="debt-display">
+        Total to repay: <strong id="repay-debt-amount">—</strong>
+      </div>
+      <button onclick="handleRepay()" class="btn btn-sepolia btn-full">
+        Repay Full Amount + Unlock Collateral
+      </button>
+      <p class="action-note">⚡ Amount is auto-calculated (principal + 10 sUSDC flat fee).</p>
+    </div>
+
+    <!-- Withdraw -->
+    <div class="action-card">
+      <div class="action-header">
+        <span class="step-badge">4</span>
+        <h4>Withdraw Collateral</h4>
+        <span class="chain-tag amoy-tag">Amoy</span>
+      </div>
+      <p class="action-desc">
+        After loan is repaid and collateral unlocked,
+        withdraw mUSDC + earned 5% APY interest.
+      </p>
+      <div class="input-row" style="margin-bottom: 16px;">
+        <input type="number" id="withdraw-amount" placeholder="Amount (mUSDC)" min="0" />
+      </div>
+      <button onclick="handleWithdraw()" class="btn btn-amoy btn-full">
+        Withdraw Collateral + Interest
+      </button>
+      <p class="action-note">⚡ Ensure your cross-chain loan is fully repaid.</p>
+    </div>
+
+  </section>
+
+  <!-- ─── Loan History ──────────────────────────────────────────── -->
+  <section id="loan-history" class="loan-history">
+    <div class="history-header">
+      <div class="history-title">
+        <span class="history-icon">📋</span>
+        <h3>Loan History</h3>
+        <span class="history-badge" id="history-count">0 events</span>
+      </div>
+      <div class="history-controls">
+        <select id="history-event-filter" class="history-select" onchange="applyHistoryFilters()">
+          <option value="all">All Events</option>
+          <option value="borrow">Borrows</option>
+          <option value="repay">Repayments</option>
+        </select>
+        <button class="refresh-btn history-refresh-btn" onclick="fetchLoanHistory()">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="history-loading" class="history-loading" style="display:none;">
+      <div class="history-skeleton"></div>
+      <div class="history-skeleton"></div>
+      <div class="history-skeleton"></div>
+      <div class="history-skeleton short"></div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="history-empty" class="history-empty">
+      <span class="empty-icon">⛓️</span>
+      <p>Connect your wallet to view loan history</p>
+      <span class="empty-sub">Events will be fetched from the blockchain</span>
+    </div>
+
+    <!-- Table -->
+    <div id="history-table-wrap" class="history-table-wrap" style="display:none;">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Event</th>
+            <th>Amount</th>
+            <th>Tx Hash</th>
+          </tr>
+        </thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div id="history-pagination" class="history-pagination" style="display:none;">
+      <button class="pagination-btn" id="history-prev" onclick="historyPrevPage()">◀ Prev</button>
+      <span id="history-page-info" class="pagination-info">Page 1 / 1</span>
+      <button class="pagination-btn" id="history-next" onclick="historyNextPage()">Next ▶</button>
+    </div>
+  </section>
+
+  <!-- ─── Footer ──────────────────────────────────────────────── -->
+  <div class="dashboard-footer">
+    <span class="dashboard-footer-text">⛓️ ChainLend — Cross-Chain DeFi Protocol</span>
+  </div>
+
+  <!-- ─── Scripts ──────────────────────────────────────────────── -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.9.0/ethers.umd.min.js"></script>
+  <script src="constants.js"></script>
+  <script src="web3.js"></script>
+  <script src="dashboard_app.js"></script>
+
+</body>
+
+</html>
