@@ -8,7 +8,7 @@ window.addEventListener("load", () => {
   setupWalletListeners(
     (addr) => {
       userAddress = addr;
-      if (addr) refreshAllBalances();
+      if (addr) { refreshAllBalances(); fetchLoanHistory(); }
       else resetUI();
     },
     () => refreshAllBalances()
@@ -26,6 +26,7 @@ async function handleConnect() {
     document.getElementById("connect-btn").disabled = true;
     setStatus("Wallet connected!", "success");
     await refreshAllBalances();
+    fetchLoanHistory();
   } catch (err) {
     setStatus("Connection failed: " + err.message, "error");
   }
@@ -165,6 +166,7 @@ async function handleDeposit() {
 
     setStatus(`✅ Deposited ${amount} mUSDC on Amoy!`, "success");
     await refreshAllBalances();
+    fetchLoanHistory();
 
   } catch (err) {
     setStatus("Deposit failed: " + _parseError(err), "error");
@@ -234,6 +236,7 @@ async function handleBorrow() {
 
     setStatus(`🎉 Done! ${amount} sUSDC received in your wallet on Sepolia!`, "success");
     await refreshAllBalances();
+    fetchLoanHistory();
 
   } catch (err) {
     setStatus("Borrow failed: " + _parseError(err), "error");
@@ -306,6 +309,7 @@ async function handleRepay() {
       "success"
     );
     await refreshAllBalances();
+    fetchLoanHistory();
 
   } catch (err) {
     setStatus("Repay failed: " + _parseError(err), "error");
@@ -332,6 +336,7 @@ async function handleWithdraw() {
 
     setStatus(`✅ Withdrawn ${amount} mUSDC + interest from Amoy!`, "success");
     await refreshAllBalances();
+    fetchLoanHistory();
 
   } catch (err) {
     setStatus("Withdraw failed: " + _parseError(err), "error");
@@ -453,3 +458,318 @@ function _parseError(err) {
 function stopPolling() {
   isPolling = false;
 }
+
+// ─── LOAN HISTORY ─────────────────────────────────────────────────────────────
+
+// State for loan history
+let historyEvents     = []; // all fetched events (unfiltered)
+let filteredEvents    = []; // after filter applied
+let historyPage       = 1;
+let historyFetching   = false;
+const blockTsCache    = {};  // { "amoy-12345": timestamp }
+
+// ─── Fetch Loan History from Sepolia ──────────────────────────────────────────
+async function fetchLoanHistory() {
+  if (!userAddress) return;
+  if (historyFetching) return;
+  historyFetching = true;
+
+  _showHistoryLoading(true);
+
+  try {
+    // Read-only Sepolia provider
+    const sepoliaProvider = new ethers.JsonRpcProvider(NETWORKS.sepolia.rpcUrls[0]);
+
+    // Contract instances for event querying
+    const sepoliaLP = new ethers.Contract(
+      ADDRESSES.sepolia.lendingPool, SEPOLIA_LENDING_POOL_ABI, sepoliaProvider
+    );
+    const sepoliaBridge = new ethers.Contract(
+      ADDRESSES.sepolia.bridge, SEPOLIA_BRIDGE_ABI, sepoliaProvider
+    );
+
+    // Get current block number
+    const sepoliaBlock = await sepoliaProvider.getBlockNumber();
+    const sepoliaFrom  = Math.max(0, sepoliaBlock - HISTORY_BLOCK_RANGE);
+
+    // Only Borrow Requested + Loan Repaid
+    const eventDefs = [
+      { contract: sepoliaLP,     event: "LoanRepaid",      chain: "sepolia", type: "repay",  label: "Loan Repaid",      provider: sepoliaProvider, from: sepoliaFrom, to: sepoliaBlock },
+      { contract: sepoliaBridge, event: "BorrowRequested", chain: "sepolia", type: "borrow", label: "Borrow Requested", provider: sepoliaProvider, from: sepoliaFrom, to: sepoliaBlock },
+    ];
+
+    // Fetch all events in parallel (chunked internally)
+    const allResults = await Promise.all(
+      eventDefs.map(def => _fetchEventsChunked(def))
+    );
+
+    // Flatten
+    historyEvents = allResults.flat();
+
+    // Sort descending by timestamp (most recent first)
+    historyEvents.sort((a, b) => b.timestamp - a.timestamp);
+
+    // Apply filters and render
+    historyPage = 1;
+    applyHistoryFilters();
+
+  } catch (err) {
+    console.error("Loan history fetch error:", err);
+    _showHistoryEmpty("Failed to fetch history — check console");
+  } finally {
+    historyFetching = false;
+    _showHistoryLoading(false);
+  }
+}
+
+// ─── Fetch Events in Chunks (avoids RPC block range limits) ───────────────────
+async function _fetchEventsChunked(def) {
+  const { contract, event, chain, type, label, provider, from, to } = def;
+  const results = [];
+  const filter = contract.filters[event](userAddress);
+
+  for (let start = from; start <= to; start += HISTORY_CHUNK_SIZE) {
+    const end = Math.min(start + HISTORY_CHUNK_SIZE - 1, to);
+    try {
+      const logs = await contract.queryFilter(filter, start, end);
+      for (const log of logs) {
+        const parsed = _parseEventLog(log, event, chain, type, label, provider);
+        if (parsed) results.push(parsed);
+      }
+    } catch (err) {
+      // Some chunks may fail on public RPCs — skip, don't crash
+      console.warn(`Chunk ${start}-${end} failed for ${event} on ${chain}:`, err.message);
+    }
+  }
+
+  // Resolve timestamps in batch
+  await _resolveTimestamps(results, provider, chain);
+
+  return results;
+}
+
+// ─── Parse a Single Event Log ─────────────────────────────────────────────────
+function _parseEventLog(log, eventName, chain, type, label, provider) {
+  try {
+    const args = log.args;
+    let amount = 0n;
+    let extra  = {};
+
+    switch (eventName) {
+      case "Deposited":
+        amount = args.amount;
+        break;
+      case "Withdrawn":
+        amount = args.amount;
+        extra.interest = args.interest;
+        break;
+      case "Locked":
+      case "Unlocked":
+        amount = args.amount;
+        break;
+      case "LoanReleased":
+        amount = args.amount;
+        break;
+      case "LoanRepaid":
+        amount = args.principal;
+        extra.fee = args.fee;
+        break;
+      case "BorrowRequested":
+        amount = args.amount;
+        extra.guid = args.guid;
+        break;
+      case "RepayUnlockSent":
+        amount = args.principal;
+        extra.guid = args.guid;
+        break;
+      case "BorrowRequestReceived":
+      case "RepayUnlockReceived":
+      case "LockFailed":
+      case "UnlockFailed":
+        amount = args.amount;
+        break;
+      default:
+        amount = 0n;
+    }
+
+    return {
+      chain,
+      type,
+      label,
+      amount,
+      extra,
+      blockNumber: log.blockNumber,
+      txHash:      log.transactionHash,
+      timestamp:   0,  // resolved later
+    };
+  } catch (err) {
+    console.warn("Event parse error:", err.message);
+    return null;
+  }
+}
+
+// ─── Batch-Resolve Block Timestamps ───────────────────────────────────────────
+async function _resolveTimestamps(events, provider, chain) {
+  // Collect unique block numbers
+  const blocks = [...new Set(events.map(e => e.blockNumber))];
+
+  // Fetch in small batches to avoid rate-limiting
+  const BATCH = 5;
+  for (let i = 0; i < blocks.length; i += BATCH) {
+    const batch = blocks.slice(i, i + BATCH);
+    const results = await Promise.all(
+      batch.map(async bn => {
+        const key = `${chain}-${bn}`;
+        if (blockTsCache[key]) return { bn, ts: blockTsCache[key] };
+        try {
+          const block = await provider.getBlock(bn);
+          const ts = block ? block.timestamp : 0;
+          blockTsCache[key] = ts;
+          return { bn, ts };
+        } catch {
+          return { bn, ts: 0 };
+        }
+      })
+    );
+    for (const { bn, ts } of results) {
+      events.filter(e => e.blockNumber === bn).forEach(e => e.timestamp = ts);
+    }
+  }
+}
+
+// ─── Apply Filters ────────────────────────────────────────────────────────────
+function applyHistoryFilters() {
+  const eventFilter = document.getElementById("history-event-filter").value;
+
+  filteredEvents = historyEvents.filter(e => {
+    if (eventFilter !== "all" && e.type !== eventFilter) return false;
+    return true;
+  });
+
+  historyPage = 1;
+  _renderHistoryTable();
+}
+
+// ─── Render Table ─────────────────────────────────────────────────────────────
+function _renderHistoryTable() {
+  const tbody     = document.getElementById("history-tbody");
+  const tableWrap = document.getElementById("history-table-wrap");
+  const emptyEl   = document.getElementById("history-empty");
+  const pagEl     = document.getElementById("history-pagination");
+  const countEl   = document.getElementById("history-count");
+
+  const total     = filteredEvents.length;
+  const totalPages = Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE));
+
+  countEl.textContent = `${total} event${total !== 1 ? "s" : ""}`;
+
+  if (total === 0) {
+    tableWrap.style.display = "none";
+    pagEl.style.display     = "none";
+    emptyEl.style.display   = "block";
+    emptyEl.querySelector("p").textContent = historyEvents.length > 0
+      ? "No events match the current filter"
+      : "No loan history found for this wallet";
+    emptyEl.querySelector(".empty-sub").textContent = historyEvents.length > 0
+      ? "Try changing the event filter"
+      : "Borrow or repay a loan to see events here";
+    return;
+  }
+
+  emptyEl.style.display   = "none";
+  tableWrap.style.display = "block";
+  pagEl.style.display     = "flex";
+
+  // Clamp page
+  if (historyPage > totalPages) historyPage = totalPages;
+
+  const start = (historyPage - 1) * HISTORY_PAGE_SIZE;
+  const page  = filteredEvents.slice(start, start + HISTORY_PAGE_SIZE);
+
+  tbody.innerHTML = page.map(e => {
+    const timeStr    = _formatTimeAgo(e.timestamp);
+    const exactTime  = e.timestamp ? new Date(e.timestamp * 1000).toLocaleString() : "—";
+    const amountStr  = formatUSDC(e.amount);
+    const explorer   = "https://testnet.layerzeroscan.com";
+    const txShort    = e.txHash ? e.txHash.slice(0, 8) + "…" + e.txHash.slice(-4) : "—";
+    const eventClass = `event-${e.type}`;
+
+    // Extra info for certain events
+    let extraInfo = "";
+    if (e.extra?.fee) {
+      extraInfo = ` (+${formatUSDC(e.extra.fee)} fee)`;
+    }
+
+    return `<tr>
+      <td class="time-cell">
+        <span class="time-relative">${timeStr}</span>
+        <span class="time-exact">${exactTime}</span>
+      </td>
+      <td>
+        <span class="event-badge ${eventClass}">
+          <span class="event-dot"></span>
+          ${e.label}
+        </span>
+      </td>
+      <td>${amountStr} sUSDC${extraInfo}</td>
+      <td>
+        <a class="tx-link" href="${explorer}/tx/${e.txHash}" target="_blank" rel="noopener">
+          ${txShort} <span class="tx-icon">↗</span>
+        </a>
+      </td>
+    </tr>`;
+  }).join("");
+
+  // Update pagination
+  document.getElementById("history-page-info").textContent = `Page ${historyPage} / ${totalPages}`;
+  document.getElementById("history-prev").disabled = historyPage <= 1;
+  document.getElementById("history-next").disabled = historyPage >= totalPages;
+}
+
+// ─── Pagination Controls ──────────────────────────────────────────────────────
+function historyPrevPage() {
+  if (historyPage > 1) {
+    historyPage--;
+    _renderHistoryTable();
+  }
+}
+
+function historyNextPage() {
+  const totalPages = Math.ceil(filteredEvents.length / HISTORY_PAGE_SIZE);
+  if (historyPage < totalPages) {
+    historyPage++;
+    _renderHistoryTable();
+  }
+}
+
+// ─── UI Helpers ───────────────────────────────────────────────────────────────
+function _showHistoryLoading(show) {
+  document.getElementById("history-loading").style.display = show ? "flex" : "none";
+  if (show) {
+    document.getElementById("history-table-wrap").style.display = "none";
+    document.getElementById("history-empty").style.display      = "none";
+    document.getElementById("history-pagination").style.display = "none";
+  }
+}
+
+function _showHistoryEmpty(message) {
+  const el = document.getElementById("history-empty");
+  el.style.display = "block";
+  el.querySelector("p").textContent = message;
+  el.querySelector(".empty-sub").textContent = "";
+  document.getElementById("history-table-wrap").style.display = "none";
+  document.getElementById("history-pagination").style.display = "none";
+}
+
+function _formatTimeAgo(unixTs) {
+  if (!unixTs) return "—";
+  const now  = Math.floor(Date.now() / 1000);
+  const diff = now - unixTs;
+
+  if (diff < 60)          return `${diff}s ago`;
+  if (diff < 3600)        return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400)       return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 86400 * 30)  return `${Math.floor(diff / 86400)}d ago`;
+  return new Date(unixTs * 1000).toLocaleDateString();
+}
+

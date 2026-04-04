@@ -422,6 +422,335 @@ button:disabled {
   width: 100%;
 }
 
+/* ─── Loan History Section ──────────────────────────────────────────────────── */
+.loan-history {
+  max-width: 1100px;
+  margin: 20px auto 0;
+  padding: 0 16px;
+}
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 20px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-bottom: none;
+}
+
+.history-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.history-title h3 {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--text);
+}
+
+.history-icon {
+  font-size: 16px;
+}
+
+.history-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--accent);
+  background: rgba(0, 255, 136, 0.08);
+  border: 1px solid rgba(0, 255, 136, 0.2);
+  padding: 2px 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.history-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.history-select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 7px 12px;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.history-select:hover,
+.history-select:focus {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.history-refresh-btn {
+  margin-top: 0 !important;
+}
+
+/* ─── History Table ─────────────────────────────────────────────────────────── */
+.history-table-wrap {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.history-table thead {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.history-table th {
+  padding: 10px 16px;
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  white-space: nowrap;
+}
+
+.history-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  color: var(--text);
+  vertical-align: middle;
+}
+
+.history-table tbody tr {
+  transition: background 0.15s;
+}
+
+.history-table tbody tr:hover {
+  background: rgba(0, 255, 136, 0.03);
+}
+
+.history-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+/* Event type badges in table */
+.event-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  font-size: 11px;
+}
+
+.event-badge .event-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 0;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.event-deposit .event-dot  { background: var(--accent); }
+.event-withdraw .event-dot { background: var(--warning); }
+.event-borrow .event-dot   { background: var(--sepolia-light); }
+.event-repay .event-dot    { background: var(--success); }
+.event-lock .event-dot     { background: var(--amoy-light); }
+.event-unlock .event-dot   { background: #00ccff; }
+.event-failed .event-dot   { background: var(--error); }
+
+.event-deposit  { color: var(--accent); }
+.event-withdraw { color: var(--warning); }
+.event-borrow   { color: var(--sepolia-light); }
+.event-repay    { color: var(--success); }
+.event-lock     { color: var(--amoy-light); }
+.event-unlock   { color: #00ccff; }
+.event-failed   { color: var(--error); }
+
+/* Chain badges in table */
+.chain-badge-sm {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 8px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.chain-badge-amoy {
+  background: rgba(130, 71, 229, 0.12);
+  color: var(--amoy-light);
+  border: 1px solid rgba(130, 71, 229, 0.25);
+}
+
+.chain-badge-sepolia {
+  background: rgba(98, 126, 234, 0.12);
+  color: var(--sepolia-light);
+  border: 1px solid rgba(98, 126, 234, 0.25);
+}
+
+/* Tx hash link */
+.tx-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 11px;
+  transition: color 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tx-link:hover {
+  color: var(--accent);
+}
+
+.tx-link .tx-icon {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+/* Time column */
+.time-cell {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.time-cell .time-relative {
+  display: block;
+}
+
+.time-cell .time-exact {
+  display: block;
+  font-size: 9px;
+  color: #555;
+  margin-top: 2px;
+}
+
+/* ─── Loading Skeleton ──────────────────────────────────────────────────────── */
+.history-loading {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  padding: 20px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.history-skeleton {
+  height: 18px;
+  background: linear-gradient(
+    90deg,
+    var(--surface2) 25%,
+    rgba(0, 255, 136, 0.04) 50%,
+    var(--surface2) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.8s ease-in-out infinite;
+  width: 100%;
+}
+
+.history-skeleton.short {
+  width: 60%;
+}
+
+@keyframes skeleton-shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* ─── Empty State ───────────────────────────────────────────────────────────── */
+.history-empty {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.history-empty .empty-icon {
+  font-size: 28px;
+  display: block;
+  margin-bottom: 12px;
+  opacity: 0.4;
+}
+
+.history-empty p {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+
+.history-empty .empty-sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: #555;
+  letter-spacing: 0.5px;
+}
+
+/* ─── Pagination ────────────────────────────────────────────────────────────── */
+.history-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 16px 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: none;
+}
+
+.pagination-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 6px 16px;
+  font-size: 11px;
+  transition: border-color 0.2s, color 0.2s;
+}
+
+.pagination-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pagination-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.pagination-info {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 1px;
+  min-width: 100px;
+  text-align: center;
+}
+
 /* ─── Dashboard Footer ─────────────────────────────────────────────────────── */
 .dashboard-footer {
   max-width: 1100px;
@@ -444,5 +773,29 @@ button:disabled {
   .balances-grid,
   .actions-grid {
     grid-template-columns: 1fr;
+  }
+
+  .history-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .history-controls {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .history-select {
+    flex: 1;
+    min-width: 100px;
+  }
+
+  .history-table {
+    font-size: 11px;
+  }
+
+  .history-table th,
+  .history-table td {
+    padding: 10px 10px;
   }
 }

@@ -150,6 +150,62 @@
 
   </section>
 
+  <!-- ─── Loan History ──────────────────────────────────────────── -->
+  <section id="loan-history" class="loan-history">
+    <div class="history-header">
+      <div class="history-title">
+        <span class="history-icon">📋</span>
+        <h3>Loan History</h3>
+        <span class="history-badge" id="history-count">0 events</span>
+      </div>
+      <div class="history-controls">
+        <select id="history-event-filter" class="history-select" onchange="applyHistoryFilters()">
+          <option value="all">All Events</option>
+          <option value="borrow">Borrows</option>
+          <option value="repay">Repayments</option>
+        </select>
+        <button class="refresh-btn history-refresh-btn" onclick="fetchLoanHistory()">↻ Refresh</button>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="history-loading" class="history-loading" style="display:none;">
+      <div class="history-skeleton"></div>
+      <div class="history-skeleton"></div>
+      <div class="history-skeleton"></div>
+      <div class="history-skeleton short"></div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="history-empty" class="history-empty">
+      <span class="empty-icon">⛓️</span>
+      <p>Connect your wallet to view loan history</p>
+      <span class="empty-sub">Events will be fetched from the blockchain</span>
+    </div>
+
+    <!-- Table -->
+    <div id="history-table-wrap" class="history-table-wrap" style="display:none;">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Event</th>
+            <th>Amount</th>
+            <th>Tx Hash</th>
+          </tr>
+        </thead>
+        <tbody id="history-tbody"></tbody>
+      </table>
+    </div>
+
+    <!-- Pagination -->
+    <div id="history-pagination" class="history-pagination" style="display:none;">
+      <button class="pagination-btn" id="history-prev" onclick="historyPrevPage()">◀ Prev</button>
+      <span id="history-page-info" class="pagination-info">Page 1 / 1</span>
+      <button class="pagination-btn" id="history-next" onclick="historyNextPage()">Next ▶</button>
+    </div>
+  </section>
+
   <!-- ─── Footer ──────────────────────────────────────────────── -->
   <div class="dashboard-footer">
     <span class="dashboard-footer-text">⛓️ ChainLend — Cross-Chain DeFi Protocol</span>

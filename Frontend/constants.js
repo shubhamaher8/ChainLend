@@ -89,6 +89,18 @@ const SEPOLIA_BRIDGE_ABI = [
   "event RepayUnlockSent(address indexed user, uint256 principal, bytes32 guid)",
 ];
 
+const AMOY_BRIDGE_ABI = [
+  "event BorrowRequestReceived(address indexed user, uint256 amount)",
+  "event RepayUnlockReceived(address indexed user, uint256 amount)",
+  "event LockFailed(address indexed user, uint256 amount)",
+  "event UnlockFailed(address indexed user, uint256 amount)",
+];
+
+// ─── Loan History Config ──────────────────────────────────────────────────────
+const HISTORY_BLOCK_RANGE = 50_000;  // how far back to scan
+const HISTORY_CHUNK_SIZE  = 5_000;   // blocks per eth_getLogs call (RPC limit)
+const HISTORY_PAGE_SIZE   = 10;      // rows per page in the UI table
+
 // Message types (matches contract constants)
 const MSG_BORROW_REQUEST = 1;
 const MSG_REPAY_UNLOCK   = 3;
