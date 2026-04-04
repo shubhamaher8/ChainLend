@@ -101,6 +101,30 @@ async function refreshAllBalances() {
           : "No active loan";
       }
 
+      // --- Borrow Gating Logic ---
+      const borrowInput = document.getElementById("borrow-amount");
+      const borrowBtn = document.getElementById("borrow-btn");
+      
+      if (repayAmount > 0n) {
+        if (borrowInput) borrowInput.disabled = true;
+        if (borrowBtn) {
+          borrowBtn.disabled = true;
+          borrowBtn.textContent = "REPAY ACTIVE LOAN FIRST";
+          borrowBtn.style.opacity = "0.5";
+          borrowBtn.style.cursor = "not-allowed";
+        }
+        document.getElementById("max-borrow").textContent = "0.00 sUSDC (loan active)";
+      } else {
+        if (borrowInput) borrowInput.disabled = false;
+        if (borrowBtn) {
+          borrowBtn.disabled = false;
+          borrowBtn.textContent = "Borrow";
+          borrowBtn.style.opacity = "1";
+          borrowBtn.style.cursor = "pointer";
+        }
+        document.getElementById("max-borrow").textContent = formatUSDC(amoyAvailable / 2n) + " sUSDC";
+      }
+
     } catch (sepoliaErr) {
       console.error("Sepolia balance fetch failed:", sepoliaErr.message);
       document.getElementById("sepolia-balance").textContent = "RPC error — refresh";
