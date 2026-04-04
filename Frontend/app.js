@@ -38,12 +38,18 @@ async function refreshAllBalances() {
   try {
     // ── Amoy balances ─────────────────────────────────────────────────
     const amoyRead = getAmoyReadContracts();
-    const [amoyAvailable, amoyLocked, amoyInterest] = await Promise.all([
+    const amoyReadProvider = new ethers.JsonRpcProvider(NETWORKS.amoy.rpcUrls[0]);
+    const amoyUSDC = new ethers.Contract(ADDRESSES.amoy.mockUSDC, ERC20_ABI, amoyReadProvider);
+
+    const [amoyAvailable, amoyLocked, amoyInterest, amoyWallet] = await Promise.all([
       amoyRead.lendingPool.getAvailableBalance(userAddress),
       amoyRead.lendingPool.getLockedBalance(userAddress),
       amoyRead.lendingPool.getAccruedInterest(userAddress),
+      amoyUSDC.balanceOf(userAddress),
     ]);
 
+    document.getElementById("amoy-wallet-balance").textContent =
+      formatUSDC(amoyWallet) + " mUSDC";
     document.getElementById("amoy-available").textContent =
       formatUSDC(amoyAvailable) + " mUSDC";
     document.getElementById("amoy-locked").textContent =
@@ -180,9 +186,7 @@ async function handleBorrow() {
       "info"
     );
 
-    // Show LayerZero scan link
-    document.getElementById("lz-scan-link").href = "https://testnet.layerzeroscan.com";
-    document.getElementById("lz-scan-link").style.display = "inline";
+
 
     // Poll Amoy until collateral locked — expectedLocked = amount * 2 (50% LTV)
     const locked = await pollUntilLocked(userAddress, amountBN * 2n);
@@ -260,9 +264,7 @@ async function handleRepay() {
       "info"
     );
 
-    // Show LayerZero scan link
-    document.getElementById("lz-scan-link").href = "https://testnet.layerzeroscan.com";
-    document.getElementById("lz-scan-link").style.display = "inline";
+
 
     // Poll Amoy until collateral unlocked
     const unlocked = await pollUntilUnlocked(userAddress);

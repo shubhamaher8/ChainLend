@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ChainLend — Cross-Chain DeFi</title>
   <link rel="stylesheet" href="style.css" />
 </head>
+
 <body>
 
   <!-- ─── Header ──────────────────────────────────────────────── -->
@@ -23,22 +25,17 @@
   <!-- ─── Status Bar ───────────────────────────────────────────── -->
   <div id="status-message" class="status-box" style="display:none;"></div>
 
-  <!-- ─── LayerZero Scan Link ──────────────────────────────────── -->
-  <div class="lz-scan-wrapper">
-    <a id="lz-scan-link"
-       href="https://testnet.layerzeroscan.com"
-       target="_blank"
-       style="display:none;"
-       class="lz-scan-btn">
-      🔍 Track message on LayerZero Scan
-    </a>
-  </div>
+
 
   <!-- ─── Balances ─────────────────────────────────────────────── -->
   <section class="balances-grid">
 
     <div class="balance-card amoy-card">
       <h3>🟣 Polygon Amoy <span class="chain-badge">Collateral Chain</span></h3>
+      <div class="balance-row">
+        <span>mUSDC in Wallet</span>
+        <strong id="amoy-wallet-balance">—</strong>
+      </div>
       <div class="balance-row">
         <span>Available Deposit</span>
         <strong id="amoy-available">—</strong>
@@ -82,11 +79,15 @@
         <h4>Deposit Collateral</h4>
         <span class="chain-tag amoy-tag">Amoy</span>
       </div>
-      <p class="action-desc">Deposit mUSDC on Amoy to use as collateral. Earns 5% APY.</p>
+      <p class="action-desc">
+        Deposit mUSDC on Amoy to use as collateral. Your
+        funds are securely locked and earn 5% APY.
+      </p>
       <div class="input-row">
         <input type="number" id="deposit-amount" placeholder="Amount (mUSDC)" min="0" />
         <button onclick="handleDeposit()" class="btn btn-amoy">Deposit</button>
       </div>
+      <p class="action-note">⚡ Direct deposit on the Polygon Amoy testnet.</p>
     </div>
 
     <!-- Borrow -->
@@ -138,10 +139,13 @@
         After loan is repaid and collateral unlocked,
         withdraw mUSDC + earned 5% APY interest.
       </p>
-      <div class="input-row">
+      <div class="input-row" style="margin-bottom: 16px;">
         <input type="number" id="withdraw-amount" placeholder="Amount (mUSDC)" min="0" />
-        <button onclick="handleWithdraw()" class="btn btn-amoy">Withdraw</button>
       </div>
+      <button onclick="handleWithdraw()" class="btn btn-amoy btn-full">
+        Withdraw Collateral + Interest
+      </button>
+      <p class="action-note">⚡ Ensure your cross-chain loan is fully repaid.</p>
     </div>
 
   </section>
@@ -158,4 +162,5 @@
   <script src="app.js"></script>
 
 </body>
+
 </html>
