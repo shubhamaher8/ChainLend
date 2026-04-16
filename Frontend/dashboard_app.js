@@ -349,7 +349,7 @@ async function pollUntilLocked(user, expectedLockedAmount) {
   const startTime = Date.now();
   isPolling = true;
 
-  setStatus("⏳ Polling Amoy for lock confirmation (checking every 10s)...", "info");
+  // setStatus("⏳ Polling Amoy for lock confirmation (checking every 10s)...", "info");
 
   while (isPolling) {
     if (Date.now() - startTime > POLL_TIMEOUT_MS) {
