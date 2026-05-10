@@ -1,0 +1,35 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="chainGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00ff88"/>
+      <stop offset="100%" stop-color="#00cc6a"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="256" height="256" rx="40" fill="#0a0a0a"/>
+
+  <!-- Glow -->
+  <circle cx="128" cy="128" r="90" fill="url(#chainGradient)" opacity="0.08"/>
+
+  <!-- Left Chain Link -->
+  <rect x="54" y="92" width="76" height="44" rx="22"
+        fill="none"
+        stroke="url(#chainGradient)"
+        stroke-width="14"/>
+
+  <!-- Right Chain Link -->
+  <rect x="126" y="120" width="76" height="44" rx="22"
+        fill="none"
+        stroke="#8247e5"
+        stroke-width="14"/>
+
+  <!-- Connector -->
+  <path d="M110 128 L146 128"
+        stroke="#e0e0e0"
+        stroke-width="12"
+        stroke-linecap="round"/>
+
+  <!-- Small protocol dot -->
+  <circle cx="128" cy="128" r="8" fill="#00ff88"/>
+</svg>
